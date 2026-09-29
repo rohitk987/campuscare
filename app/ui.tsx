@@ -1,0 +1,15 @@
+'use client';
+import {Select,SelectTrigger,SelectValue,SelectContent,SelectItem} from '@/components/ui/select';
+import {Input} from '@/components/ui/input';
+import {Textarea} from '@/components/ui/textarea';
+import {Inbox,LoaderCircle} from 'lucide-react';
+export async function api(action:string,data:any={}){const r=await fetch('/api/sitecare',{method:'POST',headers:{'Content-Type':'application/json','X-Sitecare-Request':'1'},body:JSON.stringify({action,...data})});const j:any=await r.json();if(!r.ok)throw new Error(j.error||'Request failed. Please retry.');return j;}
+export async function read(query:string){const r=await fetch('/api/sitecare?'+query,{cache:'no-store'});const j:any=await r.json();if(!r.ok){const e:any=new Error(j.error||'Unable to load saved data.');e.status=r.status;throw e;}return j;}
+export function Picker({value,onChange,options,placeholder='Select an option',label,disabled=false}:any){return <Select value={value||undefined} onValueChange={onChange} disabled={disabled}><SelectTrigger className="w-full bg-white" aria-label={label||placeholder}><SelectValue placeholder={placeholder}/></SelectTrigger><SelectContent>{options.filter((x:any)=>typeof x==='string'||x.value).map((x:any)=><SelectItem key={x.value||x} value={x.value||x}>{x.label||x}</SelectItem>)}</SelectContent></Select>}
+export function Field({label,value,onChange,type='text',hint,multiline=false,required=false,...rest}:any){const Component=multiline?Textarea:Input;return <div className="field"><label>{label}{required?' *':''}<Component aria-label={label} value={value??''} onChange={(e:any)=>onChange(e.target.value)} type={type} required={required} className="mt-2 bg-white" {...rest}/></label>{hint&&<small>{hint}</small>}</div>}
+export function SelectField({label,...props}:any){return <div className="field"><label>{label}</label><Picker label={label} {...props}/></div>}
+export function Empty({title='Nothing here yet',children}:any){return <div className="empty-state"><Inbox size={30}/><h2>{title}</h2><p className="body-copy">{children}</p></div>}
+export function Busy(){return <LoaderCircle size={17} className="loader"/>}
+export function getPosition():Promise<any>{return new Promise((resolve,reject)=>{if(!navigator.geolocation)return reject(new Error('Location access is not supported by this browser.'));navigator.geolocation.getCurrentPosition(p=>resolve({latitude:p.coords.latitude,longitude:p.coords.longitude,accuracy:p.coords.accuracy,timestamp:p.timestamp}),e=>reject(new Error(e.code===1?'Location permission was denied. Enable it in your browser’s site settings and retry.':e.code===3?'Location check timed out. Move to a clearer area and retry.':'Your location is unavailable. Check your device location settings and retry.')),{enableHighAccuracy:true,maximumAge:0,timeout:18000});});}
+export function ago(n:number){const h=Math.max(0,Math.floor((Date.now()-n)/3600000));return h<1?'Just now':h<24?`${h}h ago`:`${Math.floor(h/24)}d ago`;}
+export function initials(n:string){return (n||'U').split(/[ @.]/).filter(Boolean).slice(0,2).map(x=>x[0]).join('').toUpperCase();}
