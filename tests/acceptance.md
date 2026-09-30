@@ -20,3 +20,10 @@ All browser tests used the local preview. Camera and geolocation were simulated 
 Browser WebMCP registration is feature-detected. No supported WebMCP browser context was available for tool invocation validation; this is not required for normal use.
 
 Before a real pilot, repeat tests with multiple actual authenticated accounts, physical devices, school/private-area cases, and your real site boundaries. Test backups, recovery and retention separately.
+
+## CampusCare rename verification (2026-09-30)
+
+- TypeScript check and all 14 domain tests passed again.
+- Browser reporting flow passed against `/api/campuscare`, including camera capture, location validation, evidence persistence, repair actions, reopening, and access rejection checks.
+- Page title, visible CampusCare branding, existing sample timeline actor labels, and `campuscare-complaints.csv` download name passed.
+- New complaint numbers use `CC-`; existing identifiers and historical Git snapshots are preserved.

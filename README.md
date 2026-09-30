@@ -1,6 +1,8 @@
-# SiteCare
+# CampusCare
 
 A working multi-organisation facility reporting and maintenance prototype for colleges, schools, offices and other managed sites.
+
+[Hosted preview](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site) · [GitHub source](https://github.com/rohitk987/campuscare)
 
 ## What is implemented
 
@@ -66,11 +68,11 @@ The included 14 domain tests cover location freshness/accuracy/boundaries, build
 ## Application structure
 
 ```text
-app/sitecare.tsx                 workspace UI, navigation and dashboards
+app/campuscare.tsx                 workspace UI, navigation and dashboards
 app/report-dialog.tsx           reporting wizard and camera/location capture
 app/ticket-sheet.tsx             evidence review, actions and history
 app/admin-dialog.tsx             site, building, room and member configuration
-app/api/sitecare/route.ts        authenticated API, access checks and persistence
+app/api/campuscare/route.ts        authenticated API, access checks and persistence
 app/chatgpt-auth.ts              platform authentication integration
 lib/domain.ts                   pure location and workflow rules
 lib/server.ts                   prepared D1 statements and authorisation helpers

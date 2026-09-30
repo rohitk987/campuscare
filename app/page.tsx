@@ -1,3 +1,3 @@
-import SiteCare from './sitecare';
+import CampusCare from './campuscare';
 export const dynamic = 'force-dynamic';
-export default function Home() { return <SiteCare />; }
+export default function Home() { return <CampusCare />; }
