@@ -2,6 +2,21 @@
 
 Recorded on 1 October 2026 for version `0.1.0-preview` (`com.campuscare.app`).
 
+## Current BMSIT access build
+
+The current source and local `CampusCare-BMSIT-pilot.apk` add BMSIT OTP/enrollment handling. The GitHub `android-preview-0.1` release below is historical and has not been replaced.
+
+- Debug APK assembly, instrumentation APK assembly, five access-policy unit tests and Android lint: **passed**.
+- Current local APK SHA-256: `58a9255e6be3b2c35dd80f4b00495d0323223094c33bd6eb5602a95817cdcfe5`.
+- `NativeAccessTest`: **8 passed, 0 failed, 0 skipped** on the Android 15 / API 35 emulator.
+- The eight tests execute the actual `ApiClient` and `AppState` against synthetic HTTP responses from device loopback. They cover protected-state clearing on HTTP 428 and enrollment revocation; ordinary permission errors; failed workspace verification; same-ID email changes; delayed data/cookie rejection; cancellation of old external and same-origin redirects; WebView cookie use; and OTP logout followed by platform logout, including OTP endpoint failure.
+- No hosted mail, ChatGPT sign-in or live college data is used. Real email delivery and hosted WebView authentication remain unverified until sender credentials and institution-approved records are configured.
+- The shared portal login page is public. Protected data requires exact-domain BMSIT identity, mailbox OTP, current enrollment or explicit staff approval, and active membership.
+
+## Historical first-preview results
+
+The sections below record the earlier multi-organisation preview. Its backend identity, owner-private hosting policy, APK hash and workflow results do not describe the current BMSIT pilot build.
+
 ## Build and artifact
 
 - JDK 17, Gradle 8.11.1, Android SDK 35; native Kotlin / Jetpack Compose application.

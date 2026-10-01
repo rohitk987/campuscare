@@ -4,11 +4,17 @@ import {PILOT_ORG_ID,isPilotEmail,normaliseEmail} from '@/lib/pilot';
 import {assertEligibility,hasVerifiedSession,verificationChallenge,mailConfigured,sendVerificationCode,verifyCode,clearVerification} from '@/lib/access';
 export const dynamic='force-dynamic';
 const json=(data:any,headers:Record<string,string>={})=>Response.json(data,{headers:{'Cache-Control':'no-store',...headers}});
-function parse<T>(schema:z.ZodType<T>,data:unknown):T{const result=schema.safeParse(data);if(!result.success)throw new HttpError(400,'Check the required fields and dates.');return result.data;}
+function parse<S extends z.ZodTypeAny>(schema:S,data:unknown):z.output<S>{const result=schema.safeParse(data);if(!result.success)throw new HttpError(400,'Check the required fields and dates.');return result.data;}
 export async function GET(request:Request){try{
- const op=new URL(request.url).searchParams.get('op')||'status';
+ const params=new URL(request.url).searchParams,op=params.get('op')||'status';
  if(op==='status'){const user=await authenticatedIdentity();await assertEligibility(user);return json({userId:user.userId,email:normaliseEmail(user.email),verified:await hasVerifiedSession(user),configured:mailConfigured(),challenge:await verificationChallenge(user)});}
- if(op==='students'){const {member}=await membership(PILOT_ORG_ID);admin(member);return json({cohorts:await all('SELECT * FROM cohorts WHERE org_id=? ORDER BY admission_year DESC',PILOT_ORG_ID),students:await all('SELECT s.*,c.name cohort_name FROM student_records s JOIN cohorts c ON c.id=s.cohort_id AND c.org_id=s.org_id WHERE s.org_id=? ORDER BY s.name LIMIT 2000',PILOT_ORG_ID)});}
+ if(op==='students'){
+  const {member}=await membership(PILOT_ORG_ID);admin(member);
+  const input=parse(z.object({page:z.coerce.number().int().min(1).max(100000).default(1),search:z.string().trim().max(200).default('')}),{page:params.get('page')??undefined,search:params.get('search')??undefined});
+  const needle='%'+input.search.replace(/[\\%_]/g,'\\$&')+'%',filter="s.org_id=? AND (s.name LIKE ? ESCAPE '\\' OR s.email LIKE ? ESCAPE '\\' OR s.usn LIKE ? ESCAPE '\\')",values=[PILOT_ORG_ID,needle,needle,needle];
+  const total=(await one('SELECT COUNT(*) total FROM student_records s WHERE '+filter,...values)).total,pageSize=100,totalPages=Math.max(1,Math.ceil(total/pageSize)),page=Math.min(input.page,totalPages);
+  return json({cohorts:await all('SELECT * FROM cohorts WHERE org_id=? ORDER BY admission_year DESC',PILOT_ORG_ID),students:await all('SELECT s.*,c.name cohort_name FROM student_records s JOIN cohorts c ON c.id=s.cohort_id AND c.org_id=s.org_id WHERE '+filter+' ORDER BY s.name,s.id LIMIT ? OFFSET ?',...values,pageSize,(page-1)*pageSize),pagination:{page,pageSize,total,totalPages}});
+ }
  throw new HttpError(404,'Unknown request.');
  }catch(error){return safeError(error);}}
 export async function POST(request:Request){try{

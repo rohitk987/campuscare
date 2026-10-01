@@ -21,15 +21,15 @@ export async function assertEligibility(user:ChatGPTUser){
  const email=normaliseEmail(user.email),now=Date.now();
  const student=await one('SELECT s.*,c.active cohort_active,c.starts_at,c.ends_at FROM student_records s JOIN cohorts c ON c.id=s.cohort_id AND c.org_id=s.org_id WHERE s.org_id=? AND s.email=?',PILOT_ORG_ID,email);
  if(student){
-  if(student.status!=='active'||!student.cohort_active||now<student.starts_at||now>=student.ends_at)throw new HttpError(403,'Student access has ended or is inactive. Contact the BMSIT administrator.');
+  if(student.status!=='active'||!student.cohort_active||now<student.starts_at||now>=student.ends_at)throw new HttpError(403,'Student access has ended or is inactive. Contact the BMSIT administrator.','ACCESS_DENIED');
   return;
  }
  // The designated setup administrator and explicitly approved staff can manage the pilot.
  // A student record, when present, takes precedence even for a privileged member.
  const member=await one('SELECT * FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
- if(member&&(!member.active||member.user_id&&member.user_id!==user.userId))throw new HttpError(403,'Your BMSIT account is unavailable. Contact the administrator.');
+ if(member&&(!member.active||member.user_id&&member.user_id!==user.userId))throw new HttpError(403,'Your BMSIT account is unavailable. Contact the administrator.','ACCESS_DENIED');
  if(email===normaliseEmail(env.BMSIT_ADMIN_EMAIL||'')||member&&['admin','verifier','technician'].includes(member.role))return;
- throw new HttpError(403,'Your email is not on the approved current-student list. Ask the BMSIT administrator to check your student record and batch.');
+ throw new HttpError(403,'Your email is not on the approved current-student list. Ask the BMSIT administrator to check your student record and batch.','ACCESS_DENIED');
 }
 export async function hasVerifiedSession(user:ChatGPTUser){
  const token=await currentToken();if(!/^[a-f0-9]{64}$/.test(token))return false;
@@ -42,7 +42,7 @@ export async function verificationChallenge(user:ChatGPTUser){
 }
 export async function requireVerifiedAccess(user:ChatGPTUser){
  await assertEligibility(user);
- if(!await hasVerifiedSession(user))throw new HttpError(428,'Verify your BMSIT email with the code sent to your mailbox before accessing CampusCare.');
+ if(!await hasVerifiedSession(user))throw new HttpError(428,'Verify your BMSIT email with the code sent to your mailbox before accessing CampusCare.','EMAIL_VERIFICATION_REQUIRED');
 }
 export async function sendVerificationCode(user:ChatGPTUser){
  await assertEligibility(user);

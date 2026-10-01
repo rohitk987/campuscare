@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -60,9 +61,9 @@ class CampusViewModel : ViewModel() {
     var overlay by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("All") }
     var showWorkspaces by remember { mutableStateOf(false) }
-    fun run(block: suspend () -> Unit) { scope.launch { state.loading = true; state.error = ""; try { block() } catch (e: Exception) { state.error = e.message ?: "Please try again."; if (e is ApiException && e.signInRequired) state.authenticated = false } finally { state.loading = false } } }
+    fun run(block: suspend () -> Unit) { scope.launch { state.loading = true; state.error = ""; try { block() } catch (e: Exception) { if (e is CancellationException) throw e; state.error = e.message ?: "Please try again."; if (e is ApiException && e.signInRequired) { state.clearAccess(); overlay = "" } } finally { state.loading = false } } }
     fun openTicket(id: String) { run { state.openTicket(id); overlay = "detail" } }
-    LaunchedEffect(state) { state.loading = true; try { state.connect() } catch (e: Exception) { if (e !is ApiException || !e.signInRequired) state.error = e.message.orEmpty() } finally { state.loading = false } }
+    LaunchedEffect(state) { state.loading = true; try { state.connect() } catch (e: Exception) { if (e is CancellationException) throw e; state.error = e.message.orEmpty(); if (e is ApiException && e.signInRequired) state.clearAccess() } finally { state.loading = false } }
     BackHandler(overlay.isNotEmpty() || tab != "Home") { if (overlay.isNotEmpty()) overlay = "" else tab = "Home" }
     if (overlay == "signin") {
         AuthScreen(state.api, onBack = { overlay = "" }, onSuccess = { run { state.connect(); overlay = "" } }); return
@@ -89,9 +90,9 @@ class CampusViewModel : ViewModel() {
         Surface(color = Color.White) {
             Column(Modifier.statusBarsPadding()) {
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).clickable { showWorkspaces = true }) {
+                    Column(Modifier.weight(1f).clickable(enabled = !state.isPilot) { showWorkspaces = true }) {
                         Text("campuscare", color = Coral, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, letterSpacing = (-.4).sp)
-                        Row(verticalAlignment = Alignment.CenterVertically) { Text(state.organisation.string("name", "Select workspace"), fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false)); Icon(Icons.Outlined.ExpandMore, "Switch workspace", Modifier.size(20.dp)) }
+                        Row(verticalAlignment = Alignment.CenterVertically) { Text(state.organisation.string("name", "Select workspace"), fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false)); if (!state.isPilot) Icon(Icons.Outlined.ExpandMore, "Switch workspace", Modifier.size(20.dp)) }
                     }
                     IconButton({ run { state.connect() } }) { Icon(Icons.Outlined.Refresh, "Refresh") }
                     BadgedBox(badge = { if (state.workspace.arr("notifications").objects().any { it.long("read_at") == 0L }) Badge(containerColor = Coral) }) { IconButton({ tab = "Updates" }) { Icon(Icons.Outlined.NotificationsNone, "Updates") } }
@@ -116,15 +117,16 @@ class CampusViewModel : ViewModel() {
                 "Profile" -> ProfileScreen(state, onManage = { overlay = it }, onServer = { overlay = "server" }, onSignOut = {
                     scope.launch {
                         state.loading = true
+                        state.clearAccess()
                         runCatching { state.api.signOut() }
                         CookieManager.getInstance().removeAllCookies(null)
-                        state.bootstrap = null; state.workspace = JSONObject(); state.detail = null; state.orgId = ""; state.authenticated = false; state.loading = false; state.error = ""; tab = "Home"
+                        state.clearAccess(); state.loading = false; state.error = ""; tab = "Home"
                     }
                 })
             }
         }
     }
-    if (showWorkspaces) ModalBottomSheet(onDismissRequest = { showWorkspaces = false }, containerColor = Color.White) {
+    if (showWorkspaces && !state.isPilot) ModalBottomSheet(onDismissRequest = { showWorkspaces = false }, containerColor = Color.White) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 30.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeading("Your workspaces")
             state.organisations.forEach { org ->
@@ -148,8 +150,8 @@ class CampusViewModel : ViewModel() {
         }
         if (error.isNotEmpty()) Notice(error, true)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        PrimaryButton("Sign in to your workspace", !loading, onSignIn)
-        Text("This preview uses your CampusCare portal’s ChatGPT sign-in. Workspace membership and portal access are required.", fontSize = 13.sp, color = Muted)
+        PrimaryButton("Sign in and verify BMSIT email", !loading, onSignIn)
+        Text("Use your official BMSIT account, then verify the mailbox code. Students need an approved current enrollment record.", fontSize = 13.sp, color = Muted)
         TextButton(onServer, Modifier.align(Alignment.CenterHorizontally)) { Text("Connection settings") }
     }
 }
@@ -223,7 +225,7 @@ class CampusViewModel : ViewModel() {
         item { Text("My profile", fontSize = 27.sp, fontWeight = FontWeight.Bold) }
         item { Panel { Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) { Surface(shape = RoundedCornerShape(18.dp), color = Teal) { Text(state.user.string("name", "C").take(1).uppercase(), Modifier.padding(22.dp), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold) }; Column { Text(state.user.string("name"), fontSize = 18.sp, fontWeight = FontWeight.Bold); Text(state.user.string("email"), fontSize = 13.sp, color = Muted); Text(state.member.string("role").replaceFirstChar { it.uppercase() }, color = Teal, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) } } } }
         item { Panel { FeatureLine(Icons.Outlined.Shield, "Your workspace access", "${state.organisation.string("name")} · ${state.member.string("site_scope").let { if (it == "*") "All authorised sites" else "Selected sites" }}"); FeatureLine(Icons.Outlined.LocationOn, "Location & camera", "Requested only while reporting a new issue. Progress stays available from anywhere.") } }
-        item { Panel { if (state.isAdmin) { MenuRow("People & access", Icons.Outlined.Groups) { onManage("People") }; MenuRow("Workspace settings", Icons.Outlined.Settings) { onManage("Settings") } }; MenuRow("Locations", Icons.Outlined.Apartment) { onManage("Locations") }; MenuRow("Create a workspace", Icons.Outlined.AddBusiness) { onManage("Create workspace") }; MenuRow("Connection settings", Icons.Outlined.Link, onServer); MenuRow("Sign out", Icons.Outlined.Logout, onSignOut) } }
+        item { Panel { if (state.isAdmin) { MenuRow("People & access", Icons.Outlined.Groups) { onManage("People") }; MenuRow("Workspace settings", Icons.Outlined.Settings) { onManage("Settings") } }; MenuRow("Locations", Icons.Outlined.Apartment) { onManage("Locations") }; if (!state.isPilot) MenuRow("Create a workspace", Icons.Outlined.AddBusiness) { onManage("Create workspace") }; MenuRow("Connection settings", Icons.Outlined.Link, onServer); MenuRow("Sign out", Icons.Outlined.Logout, onSignOut) } }
         item { Text("CampusCare · Android preview 0.1\nColleges, schools, offices and shared spaces.", color = Muted, fontSize = 12.sp) }
     }
 }

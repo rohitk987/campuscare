@@ -64,10 +64,10 @@ import java.net.URI
                         }
                         override fun onReceivedError(view: WebView, request: WebResourceRequest, e: WebResourceError) { if (request.isForMainFrame) { error = "The sign-in page could not load. Check your connection and retry."; busy = false } }
                     }
-                    loadUrl(api.baseUrl + "/signin-with-chatgpt?return_to=%2F")
+                    loadUrl(api.baseUrl + "/")
                 }
             })
-            Text("Sign-in is complete only when the CampusCare server confirms your account. Third-party sign-in availability depends on your provider.", Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
+            Text("Complete BMSIT sign-in and the email code in this page, then tap Check sign-in above. Current student eligibility is verified by the server.", Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall, color = Muted)
         }
     }
     DisposableEffect(Unit) { onDispose { web?.stopLoading(); web?.destroy(); web = null } }

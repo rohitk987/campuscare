@@ -191,3 +191,30 @@ test('invalid JSON and cross-origin access writes are rejected',async()=>{
  assert.equal((await access.POST(new Request('https://campus.test/api/access',{method:'POST',headers:{'X-Campuscare-Request':'1'},body:'broken-json'}))).status,400);
  assert.equal((await access.POST(new Request('https://campus.test/api/access',{method:'POST',headers:{'Content-Type':'application/json','X-Campuscare-Request':'1','Origin':'https://evil.test'},body:JSON.stringify({action:'send_code'})}))).status,403);assert.equal(emails.length,0);
 });
+test('administrators can find and suspend students beyond the first 2000 records',async()=>{
+ await signIn(ADMIN);database.exec('BEGIN');
+ const insert=database.prepare('INSERT INTO student_records(id,org_id,email,name,usn,cohort_id,status,updated_at) VALUES(?,?,?,?,?,?,?,?)');
+ for(let index=0;index<2105;index++){const number=String(index).padStart(4,'0');insert.run('roster-'+number,PILOT_ORG_ID,'roster'+number+'@bmsit.in','Student '+number,'ROSTER-'+number,'current-batch','active',now);}
+ database.exec('COMMIT');
+ const first=await (await accessGet('students')).json();assert.equal(first.students.length,100);assert.equal(first.pagination.total,2105);assert.equal(first.pagination.totalPages,22);
+ const last=await (await accessGet('students&page=22')).json();assert.equal(last.students.length,5);assert.equal(last.students.at(-1).email,'roster2104@bmsit.in');
+ const found=await (await accessGet('students&search=ROSTER-2104')).json();assert.equal(found.pagination.total,1);const student=found.students[0];assert.equal(student.email,'roster2104@bmsit.in');
+ assert.equal((await accessPost('save_student',{email:student.email,name:student.name,usn:student.usn,cohortId:student.cohort_id,status:'suspended'})).status,200);
+ visitor=user(student.email);cookie='';assert.equal((await accessPost('send_code')).status,403);
+});
+test('student search treats wildcard and SQL syntax as literal input',async()=>{
+ await signIn(ADMIN);approve('percent@bmsit.in');approve('ordinary@bmsit.in');database.prepare('UPDATE student_records SET name=? WHERE email=?').run('Student 100%_ready','percent@bmsit.in');
+ const results=await (await accessGet('students&search='+encodeURIComponent('%_'))).json();assert.equal(results.pagination.total,1);assert.equal(results.students[0].email,'percent@bmsit.in');
+ const injection=await (await accessGet('students&search='+encodeURIComponent("' OR 1=1 --"))).json();assert.equal(injection.pagination.total,0);
+});
+test('student pagination rejects invalid inputs and clamps pages after records change',async()=>{
+ await signIn(ADMIN);approve('student@bmsit.in');
+ for(const page of ['0','-1','1.5','bad','100001'])assert.equal((await accessGet('students&page='+page)).status,400);
+ assert.equal((await accessGet('students&search='+'x'.repeat(201))).status,400);
+ const results=await (await accessGet('students&page=999')).json();assert.equal(results.pagination.page,1);assert.equal(results.students.length,1);
+});
+test('global eligibility rejection is distinct from an ordinary workflow permission error',async()=>{
+ approve('student@bmsit.in');await signIn('student@bmsit.in');const forbidden=await post('save_site',{orgId:PILOT_ORG_ID});assert.equal(forbidden.status,403);assert.equal((await forbidden.json()).code,undefined);
+ database.prepare("UPDATE student_records SET status='graduated'").run();const denied=await get('op=bootstrap');assert.equal(denied.status,403);assert.equal((await denied.json()).code,'ACCESS_DENIED');
+ database.prepare("UPDATE student_records SET status='active'").run();cookie='';const expired=await get('op=bootstrap');assert.equal(expired.status,428);assert.equal((await expired.json()).code,'EMAIL_VERIFICATION_REQUIRED');
+});

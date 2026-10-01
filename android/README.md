@@ -11,7 +11,7 @@ Screenshots show fictional local sample data. [Download the Android preview](htt
 
 ## Install the preview
 
-Install `CampusCare-Android-preview.apk` on Android 8.0 or later. Open **CampusCare**, then **Sign in to your workspace**. The default server is the existing [CampusCare portal](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site). Your account must have access to that private portal as well as an approved application membership.
+Install `CampusCare-Android-preview.apk` on Android 8.0 or later. Open **CampusCare**, then **Sign in to your workspace**. The default server is the existing [CampusCare portal](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site). The linked 0.1 release is historical and predates the BMSIT OTP policy. Build the current source for the new access handling. Students need an official BMSIT account, a current approved enrollment record and email OTP verification.
 
 This APK is a debug-signed development preview, not a Play Store release. Android may ask you to permit installation from the app used to open the APK.
 
@@ -31,11 +31,11 @@ New reports require location and photo evidence. Authentication, tracking, comme
 
 ## Authentication and current limits
 
-This preview reuses the portal's **ChatGPT sign-in** in an Android WebView. After the server confirms authentication, native requests use the corresponding same-origin session cookies. No identity headers, passwords, bypass tokens, or service credentials are embedded in the app. Cookies are never sent to another origin during redirects; production connections require HTTPS.
+This preview reuses the portal's **ChatGPT sign-in** in an Android WebView. The embedded portal opens the existing website, including mailbox OTP verification. Tap **Check sign-in** after verifying the code. Native requests use the shared same-origin session cookies. HTTP 428 and explicitly classified enrollment/domain/deactivation denials clear protected state; ordinary workflow permission errors retain the session. Old request responses are discarded after access changes. Sign-out revokes the OTP session before attempting platform sign-out. No identity headers, passwords, bypass tokens, or service credentials are embedded in the app. Cookies are never sent to another origin during redirects; production connections require HTTPS.
 
 Local development sign-in and native session reuse are covered by emulator tests. **The hosted ChatGPT flow, the user's actual MFA/SSO provider, and physical-phone sign-in have not been verified in this environment.** Some external identity providers reject embedded WebViews. A production rollout should replace this preview integration with a supported external-browser OAuth/PKCE flow and a native session exchange; simply opening a Custom Tab does not transfer its cookies to this app. Do not spoof browser identity or disable TLS validation to work around provider restrictions.
 
-The portal is currently owner-private. Approving an email under People does not automatically grant access through the hosting platform. Institutional SSO, platform billing, background push notifications, and Play Store publication are outside this preview. Existing server limitations described in the root README still apply.
+The portal login page is shared by link; protected data requires the server-checked BMSIT identity, OTP session, current enrollment or explicitly approved staff role, and active membership. Institutional SSO, platform billing, background push notifications, and Play Store publication are outside this preview. Existing server limitations described in the root README still apply.
 
 GPS accuracy varies indoors and does not identify a floor. The native client rejects location readings flagged as mock, but neither GPS nor a camera intent proves physical presence or a genuine defect. Staff verification is still required.
 
@@ -67,11 +67,19 @@ adb reverse tcp:5173 tcp:5173
 
 In the Android app, open **Connection settings** and use `http://127.0.0.1:5173`. Debug builds also support the emulator host alias `10.0.2.2`. HTTP for arbitrary hosts is rejected. Production builds accept HTTPS only.
 
-The backend's development sign-in supplies its local test identity. This identity is not included in the hosted production service. All synthetic test complaints are placed in the **Android integration checks** workspace.
+The backend's old development identity is rejected by the current BMSIT policy. The historical instrumentation suite uses its tagged backend and synthetic **Android integration checks** workspace; it does not establish current OTP sign-in readiness. The current access-policy unit tests run without a server or mail provider.
 
 ## Android verification
 
-With the local backend and an Android 15 emulator running, use the Windows runner to keep the emulator's synthetic GPS reading fresh throughout the tests:
+For the current BMSIT access handling, run the five unit tests and eight device tests:
+
+```sh
+./gradlew :app:testDebugUnitTest :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.campuscare.app.NativeAccessTest
+```
+
+The device tests start an in-process loopback HTTP fixture. They check OTP expiry, enrollment revocation, ordinary permission errors, identity changes, stale responses and cookies, redirect cancellation, shared cookies and both logout endpoints. No mail provider or college account is required; the fixture is absent from the application APK. These tests do not establish hosted WebView sign-in or real OTP delivery.
+
+The following historical workflow tests require their tagged backend; the current BMSIT backend rejects the old development identity. With that local backend and an Android 15 emulator running, use the Windows runner to keep the emulator's synthetic GPS reading fresh throughout the tests:
 
 ```powershell
 .\scripts\test-local.ps1

@@ -15,6 +15,7 @@ import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 const val DEFAULT_BASE_URL = "https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site"
 
@@ -23,6 +24,9 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
     val baseUrl: String = normaliseBaseUrl(serverUrl)
     private val origin = URI(baseUrl)
     private val apiUrl = "$baseUrl/api/campuscare"
+    private val requestEpoch = AtomicLong(0)
+    var onAccessLost: ((ApiException) -> Unit)? = null
+    fun cancelPendingRequests() { requestEpoch.incrementAndGet() }
 
     suspend fun bootstrap(): JSONObject = get(mapOf("op" to "bootstrap"))
 
@@ -31,10 +35,15 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
 
     /** Call the server logout endpoint without following its redirect. UI clears local state in finally. */
     suspend fun signOut() {
-        val response = exchange("GET", URL("$baseUrl/signout-with-chatgpt?return_to=%2F"),
-            followRedirects = false)
-        // A redirect is the normal logout response, and an expired session is already signed out.
-        if (response.status !in 200..399 && response.status != 401) checkResponse(response)
+        try {
+            parseJson(exchange("POST", URL("$baseUrl/api/access"),
+                "{\"action\":\"logout\"}".toByteArray(Charsets.UTF_8), "application/json; charset=utf-8"))
+        } finally {
+            val response = exchange("GET", URL("$baseUrl/signout-with-chatgpt?return_to=%2F"),
+                followRedirects = false)
+            // A redirect is the normal platform logout response.
+            if (response.status !in 200..399 && response.status != 401) checkResponse(response)
+        }
     }
 
     suspend fun workspace(orgId: String): JSONObject =
@@ -118,12 +127,15 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
         body: ByteArray? = null,
         contentType: String? = null,
         followRedirects: Boolean = true,
-    ): ApiResponse = withContext(Dispatchers.IO) {
+    ): ApiResponse {
+        val generation = requestEpoch.get()
+        return withContext(Dispatchers.IO) {
         try {
             var url = initialUrl
             var redirectCount = 0
             while (true) {
                 currentCoroutineContext().ensureActive()
+                if (generation != requestEpoch.get()) throw CancellationException("A previous session request was discarded.")
                 if (!sameOrigin(url)) {
                     throw ApiException(0, "The server redirected to sign-in. Sign in again to continue.", true)
                 }
@@ -137,7 +149,11 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
                     connection.setRequestProperty("Accept", "application/json, image/jpeg")
                     connection.setRequestProperty("Cache-Control", "no-cache")
                     // Obtain cookies from the same WebView store used during sign-in.
-                    CookieManager.getInstance().getCookie(url.toString())?.takeIf { it.isNotBlank() }?.let {
+                    val sessionCookie = withContext(Dispatchers.Main.immediate) {
+                        if (generation != requestEpoch.get()) throw CancellationException("A previous session request was discarded.")
+                        CookieManager.getInstance().getCookie(url.toString())
+                    }
+                    sessionCookie?.takeIf { it.isNotBlank() }?.let {
                         connection.setRequestProperty("Cookie", it)
                     }
                     if (method == "POST") {
@@ -151,10 +167,13 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
                         connection.outputStream.use { it.write(body) }
                     }
                     val status = connection.responseCode
-                    rememberCookies(url, connection)
+                    withContext(Dispatchers.Main.immediate) {
+                        if (generation != requestEpoch.get()) throw CancellationException("A previous session request was discarded.")
+                        rememberCookies(url, connection)
+                    }
                     if (status in listOf(301, 302, 303, 307, 308)) {
                         if (!followRedirects) return@withContext ApiResponse(status,
-                            connection.contentType.orEmpty(), ByteArray(0))
+                            connection.contentType.orEmpty(), ByteArray(0), generation)
                         val location = connection.getHeaderField("Location")
                             ?: throw ApiException(status, "The server returned an incomplete redirect. Please retry.")
                         val target = URL(url, location)
@@ -186,7 +205,7 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
                         }
                         output.toByteArray()
                     } ?: ByteArray(0)
-                    return@withContext ApiResponse(status, connection.contentType.orEmpty(), bytes)
+                    return@withContext ApiResponse(status, connection.contentType.orEmpty(), bytes, generation)
                 } finally {
                     connection.disconnect()
                 }
@@ -196,12 +215,19 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
         } catch (error: CancellationException) {
             throw error
         } catch (error: ApiException) {
+            if (generation != requestEpoch.get()) throw CancellationException("A previous session request was discarded.")
+            if (error.signInRequired) withContext(Dispatchers.Main.immediate) {
+                if (generation == requestEpoch.get()) onAccessLost?.invoke(error)
+            }
             throw error
         } catch (error: SocketTimeoutException) {
+            if (generation != requestEpoch.get()) throw CancellationException("A previous session request was discarded.")
             throw ApiException(0, "The server took too long to respond. Check your connection and retry.", cause = error)
         } catch (error: IOException) {
+            if (generation != requestEpoch.get()) throw CancellationException("A previous session request was discarded.")
             throw ApiException(0, "Could not connect to CampusCare. Check your connection and server address.", cause = error)
         }
+    }
     }
 
     private fun rememberCookies(url: URL, connection: HttpURLConnection) {
@@ -236,18 +262,23 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
     }
 
     private fun checkResponse(response: ApiResponse) {
+        if (response.generation != requestEpoch.get()) throw CancellationException("A previous session request was discarded.")
         val prefix = response.bytes.copyOfRange(0, minOf(response.bytes.size, 512))
             .toString(Charsets.UTF_8).trimStart()
         val isHtml = response.contentType.contains("text/html", ignoreCase = true) ||
             prefix.startsWith("<!doctype html", ignoreCase = true) ||
             prefix.startsWith("<html", ignoreCase = true)
-        if (response.status == 401 || isHtml) {
-            throw ApiException(response.status, "Sign in again to access your workspace.", true)
+        val serverError = if (response.status !in 200..299) runCatching {
+            JSONObject(response.bytes.toString(Charsets.UTF_8))
+        }.getOrNull() else null
+        val serverMessage = serverError?.optString("error")?.takeIf { it.isNotBlank() }
+        if (AccessPolicy.needsSignIn(response.status, isHtml, serverError?.optString("code"))) {
+            val error = ApiException(response.status, serverMessage ?: if (response.status == 428)
+                "Verify your BMSIT email to continue." else "Sign in again to access your workspace.", true)
+            onAccessLost?.invoke(error)
+            throw error
         }
         if (response.status !in 200..299) {
-            val serverMessage = runCatching {
-                JSONObject(response.bytes.toString(Charsets.UTF_8)).optString("error").takeIf { it.isNotBlank() }
-            }.getOrNull()
             val fallback = when (response.status) {
                 403 -> "You do not have permission to perform this action."
                 404 -> "This item is unavailable or you do not have access to it."
@@ -293,4 +324,4 @@ class ApiException(
     cause: Throwable? = null,
 ) : IOException(message, cause)
 
-private data class ApiResponse(val status: Int, val contentType: String, val bytes: ByteArray)
+private data class ApiResponse(val status: Int, val contentType: String, val bytes: ByteArray, val generation: Long)
