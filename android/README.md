@@ -1,0 +1,103 @@
+# CampusCare for Android
+
+A native Kotlin / Jetpack Compose client for the existing CampusCare maintenance portal. The interface follows MyGate's familiar community-app patterns: a workspace selector, quick actions, Helpdesk cards, an Updates feed, bottom navigation, and a prominent yellow complaint action. CampusCare uses its own name, icons, colours, and implementation.
+
+<p>
+  <img src="docs/android-home.png" width="250" alt="CampusCare native Android home screen" />
+  <img src="docs/android-helpdesk.png" width="250" alt="CampusCare native Helpdesk screen" />
+</p>
+
+Screenshots show fictional local sample data. [Download the Android preview](https://github.com/rohitk987/campuscare/releases/tag/android-preview-0.1).
+
+## Install the preview
+
+Install `CampusCare-Android-preview.apk` on Android 8.0 or later. Open **CampusCare**, then **Sign in to your workspace**. The default server is the existing [CampusCare portal](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site). Your account must have access to that private portal as well as an approved application membership.
+
+This APK is a debug-signed development preview, not a Play Store release. Android may ask you to permit installation from the app used to open the APK.
+
+## Implemented screens and workflows
+
+- Home: organisation switching, quick actions, complaint counts, and recent complaints.
+- Helpdesk: search, category/status filters, own complaints, followed issues, review queue, and assigned work.
+- New report: native precise-location permission, fresh GPS/network reading, server boundary check, building suggestions, valid floor/area selectors, item details, and duplicate suggestions.
+- Evidence: native camera capture intent, image rotation/resizing, EXIF GPS metadata, fresh location associated with the upload, authenticated multipart upload, and evidence-expiry countdown. The interface offers no gallery picker.
+- Complaint detail: private photo download, location evidence, chronological history, staff verification, assignment, repair progress, hold/resume, resolution confirmation, comments, and reviewed reopening.
+- Updates: reporter notifications, direct complaint links, and mark-all-read.
+- Administration: create workspaces, add/edit sites and buildings, add areas, approve/deactivate members, assign site scopes, and update workspace settings.
+- Emergency instructions remain accessible without location or camera permission.
+- Profile, sign-out, configurable trusted server origin, and activity-recreation state retention.
+
+New reports require location and photo evidence. Authentication, tracking, comments, and reopening requests do not require the reporter to be on site. The server remains authoritative for memberships, scopes, evidence freshness, duplicate submissions, and workflow permissions.
+
+## Authentication and current limits
+
+This preview reuses the portal's **ChatGPT sign-in** in an Android WebView. After the server confirms authentication, native requests use the corresponding same-origin session cookies. No identity headers, passwords, bypass tokens, or service credentials are embedded in the app. Cookies are never sent to another origin during redirects; production connections require HTTPS.
+
+Local development sign-in and native session reuse are covered by emulator tests. **The hosted ChatGPT flow, the user's actual MFA/SSO provider, and physical-phone sign-in have not been verified in this environment.** Some external identity providers reject embedded WebViews. A production rollout should replace this preview integration with a supported external-browser OAuth/PKCE flow and a native session exchange; simply opening a Custom Tab does not transfer its cookies to this app. Do not spoof browser identity or disable TLS validation to work around provider restrictions.
+
+The portal is currently owner-private. Approving an email under People does not automatically grant access through the hosting platform. Institutional SSO, platform billing, background push notifications, and Play Store publication are outside this preview. Existing server limitations described in the root README still apply.
+
+GPS accuracy varies indoors and does not identify a floor. The native client rejects location readings flagged as mock, but neither GPS nor a camera intent proves physical presence or a genuine defect. Staff verification is still required.
+
+## Open and build
+
+Open this `android/` directory in Android Studio, or use JDK 17 and Android SDK 35 from the command line. The checked-in Gradle wrapper pins Gradle 8.11.1 with its distribution checksum.
+
+```sh
+./gradlew :app:assembleDebug
+```
+
+On Windows:
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+The normal output is `app/build/outputs/apk/debug/app-debug.apk`. Set `ANDROID_HOME` to your installed SDK, or use an untracked `local.properties` containing `sdk.dir=...`. Signing keys and machine-specific paths are excluded from source control.
+
+For a machine with limited space, `CAMPUSCARE_BUILD_ROOT` can place module build output on another drive; `GRADLE_USER_HOME` and Gradle's `--project-cache-dir` control the other caches. No machine-specific drive is hardcoded in application source.
+
+## Run against the local backend
+
+Follow the root README to migrate and start the existing web backend at `http://127.0.0.1:5173`. Then:
+
+```sh
+adb reverse tcp:5173 tcp:5173
+```
+
+In the Android app, open **Connection settings** and use `http://127.0.0.1:5173`. Debug builds also support the emulator host alias `10.0.2.2`. HTTP for arbitrary hosts is rejected. Production builds accept HTTPS only.
+
+The backend's development sign-in supplies its local test identity. This identity is not included in the hosted production service. All synthetic test complaints are placed in the **Android integration checks** workspace.
+
+## Android verification
+
+With the local backend and an Android 15 emulator running, use the Windows runner to keep the emulator's synthetic GPS reading fresh throughout the tests:
+
+```powershell
+.\scripts\test-local.ps1
+```
+
+On other platforms, run `adb reverse tcp:5173 tcp:5173`, send `adb emu geo fix 77.5946 12.9716` once per second in a second terminal, and run `./gradlew :app:connectedDebugAndroidTest`. Stop the coordinate updates when the tests finish. These coordinates belong only to the local test workspace; the runner does not change production boundaries.
+
+The instrumentation suite exercises native login/navigation, tenant and reporting gates, JPEG resizing/geotagging, multipart evidence upload/download, idempotent submission, and repair/reopening transitions. The native report test uses the emulator's location provider and intercepts only the external camera intent to return an explicitly synthetic test photo. Test-only fixtures are compiled into the separate test APK, not the deliverable app.
+
+Physical camera behavior, real campus boundaries/accuracy, provider-specific production sign-in, and multi-account operation still need a pilot on actual devices. See `TESTING.md` for the recorded results and their scope.
+
+## Source layout
+
+| File | Purpose |
+| --- | --- |
+| `MainActivity.kt`, `Design.kt` | Native app shell, home/helpdesk/updates/profile, visual components |
+| `AppState.kt` | Workspace state and available workflow actions |
+| `AuthScreen.kt`, `ApiClient.kt` | Portal sign-in, safe connection settings, authenticated requests |
+| `ReportScreen.kt`, `DeviceEvidence.kt` | Reporting wizard, Android permissions, camera and geotagging |
+| `TicketScreen.kt` | Evidence, timeline, and repair/review actions |
+| `ManagementScreen.kt` | Workspaces, facilities, memberships, settings |
+| `src/androidTest/` | Local backend and Android UI integration tests |
+
+## Design and platform references
+
+- [MyGate Helpdesk](https://help.mygate.in/articles/124167-how-to-raise-a-helpdesk-ticket-on-mygate-app)
+- [MyGate July 2025 dashboard and Helpdesk update](https://mygate.com/wp-content/uploads/2025/11/Society-Dashboard-Updates-July-25_compressed.pdf)
+- [Android WebView and authentication guidance](https://developer.android.com/develop/ui/views/layout/webapps)
+- [Android command-line builds](https://developer.android.com/build/building-cmdline)

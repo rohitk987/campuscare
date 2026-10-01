@@ -1,0 +1,40 @@
+# CampusCare Android preview verification
+
+Recorded on 1 October 2026 for version `0.1.0-preview` (`com.campuscare.app`).
+
+## Build and artifact
+
+- JDK 17, Gradle 8.11.1, Android SDK 35; native Kotlin / Jetpack Compose application.
+- `:app:assembleDebug`, `:app:assembleDebugAndroidTest`, and `:app:lintDebug`: **passed**.
+- Android lint: **0 errors, 19 warnings**. The remaining warnings concern dependency updates, Kotlin/Compose style suggestions, and Android 12 backup configuration. This preview sets `allowBackup=false`; device-transfer behaviour still needs a production policy review.
+- APK package and label verified with Android `aapt`: `com.campuscare.app`, **CampusCare**, minimum API 26 (Android 8), target API 35.
+- Debug APK signature verified with `apksigner` (v2 signature).
+- Delivered APK SHA-256: `7b46ffcf3269b4c2e416b802215fbb03730229620f5ca188b80cfb6178d7a053`.
+
+## Executed integration checks
+
+The final combined instrumentation run returned **OK (3 tests)** in 42.486 seconds on a Pixel 7 Android 15 emulator, against the existing local CampusCare HTTP backend and its D1/R2 development storage. Each test contains multiple assertions and requests.
+
+| Test | What the executed test establishes |
+| --- | --- |
+| `ApiIntegrationTest.authenticatedClientHonoursTenantAndReportingGates` | Actual local WebView sign-in creates a session usable by native requests. Unknown and unauthorised workspaces are rejected. Unconfigured, off-site and stale-location reporting attempts fail. Submission without a photo fails. JPEG processing adds the expected EXIF coordinates, private upload/download round-trips, repeated submission is idempotent, and the verify → assign → start → hold → resume → resolve → close → reviewed reopening lifecycle succeeds. Logout invalidates the local session. |
+| `MobileUiTest.nativeSignInNavigationAndReportingGate` | Native welcome/sign-in, Home, Helpdesk search, complaint details, reporting gate, Updates, Profile, Locations and sign-out operate through Compose UI actions. Recreating the activity retains the report screen. Screenshots are captured from the app's own Compose root. |
+| `NativeReportFlowTest.reportUsesCameraLocationAndStaffVerification` | The actual emulator location provider passes the server's configured test boundary. Building/floor/room choices and text input reach the native camera step. Submission is disabled without photo evidence. The camera intent result is resized/geotagged and uploaded with another fresh location reading. Native submission creates a pending complaint with private evidence; the native staff action verifies it. |
+
+The native report test replaces **only the external camera activity result** with a JPEG labelled `SIMULATED CAMERA · LOCAL TEST`. It does not replace the app's location provider, HTTP client, server validation, multipart upload, database writes, or staff workflow. The local test identity comes from the backend's development sign-in. It is not a production account or an app bypass.
+
+Test code is compiled into a separate instrumentation APK and is absent from the delivered application APK. All synthetic reports and test boundaries are in the local **Android integration checks** office workspace. No live campus complaint was filed during testing.
+
+The location test initially found a mismatch between its saved fixture boundary and emulator coordinates. Both now use `12.9716, 77.5946`, and the native fixture is refreshed before each run. No production location rule was relaxed.
+
+## Visual verification
+
+Inspected screenshots from the final application build: Home, filtered Helpdesk, and photo submission. They show CampusCare branding, workspace selection, yellow complaint actions, teal icons, card layouts, and Home / Helpdesk / Updates / Profile navigation. The screenshots in `docs/` contain fictional local records.
+
+## Scope and remaining device checks
+
+The automated run verifies the local native/backend integration. It does **not** establish successful hosted ChatGPT/MFA/SSO login, physical camera behaviour, real indoor GPS accuracy, or compatibility on every Android 8–15 device. Hosted access remains owner-private, and some authentication providers reject embedded WebViews. See the authentication section in the README before a live pilot.
+
+New complaints always require location and photo evidence; existing complaint tracking remains available remotely. These checks support staff review and do not guarantee that every complaint or GPS reading is genuine. A real pilot must configure actual boundaries and verify the location/camera flow on the intended phones.
+
+Use `scripts/test-local.ps1` with a local backend and emulator to repeat the suite. It maintains fresh emulator GPS readings for both reporting checks.

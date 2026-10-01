@@ -4,6 +4,10 @@ A working multi-organisation facility reporting and maintenance prototype for co
 
 [Hosted preview](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site) · [GitHub source](https://github.com/rohitk987/campuscare)
 
+## Android app
+
+The native Android client is in [`android/`](android/README.md). It uses Kotlin and Jetpack Compose, with a MyGate-inspired home, Helpdesk, Updates and Profile interface. It connects to this backend for reporting, evidence, staff workflows and administration. The Android README contains installation, authentication limitations, build and emulator-test instructions.
+
 ## What is implemented
 
 - Separate organisation workspaces with server-checked memberships and site scopes.
