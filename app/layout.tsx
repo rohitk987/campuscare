@@ -3,8 +3,8 @@ import "./globals.css";
 import "./product.css";
 
 export const metadata: Metadata = {
-  title: "CampusCare — Facility operations",
-  description: "A shared workspace for reporting, verifying and resolving facility issues across colleges, schools and offices.",
+  title: "CampusCare — BMSIT",
+  description: "The BMSIT campus pilot for reporting, verifying and resolving facility issues.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

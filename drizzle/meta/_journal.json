@@ -8,6 +8,13 @@
       "when": 1790662334538,
       "tag": "0000_flaky_talisman",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790837040629,
+      "tag": "0001_rare_wind_dancer",
+      "breakpoints": true
     }
   ]
 }

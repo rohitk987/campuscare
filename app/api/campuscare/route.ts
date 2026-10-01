@@ -1,7 +1,7 @@
 import {z} from 'zod';
-import {all,one,stmt,db,bucket,uid,identity,membership,admin,siteAccess,ticketAccess,mutateRequest,safeError,HttpError,insert} from '@/lib/server';
+import {all,one,stmt,db,bucket,uid,identity,membership,initialisePilot,admin,siteAccess,ticketAccess,mutateRequest,safeError,HttpError,insert} from '@/lib/server';
 import {categories,roles,checkPosition,buildingCandidates,withinScope,transition,statusLabel} from '@/lib/domain';
-import {makeOrganisation,seedWorkspaces} from '@/lib/seed';
+import {PILOT_ORG_ID,PILOT_ORG_NAME,PILOT_DOMAINS,PILOT_ACCESS_MESSAGE,isPilotEmail} from '@/lib/pilot';
 export const dynamic='force-dynamic';
 const text=z.string().trim().min(1).max(200),id=text,position=z.object({latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),accuracy:z.number().positive(),timestamp:z.number()});
 const json=(value:any)=>Response.json(value,{headers:{'Cache-Control':'no-store'}});
@@ -13,8 +13,10 @@ function redact(t:any,user:any,m:any){const full=t.reporter_id===user.userId||['
 export async function GET(request:Request){try{
  const url=new URL(request.url),op=url.searchParams.get('op')||'bootstrap';const user=await identity();
  if(op==='bootstrap'){
-  const organisations=await all('SELECT o.*,m.id member_id,m.role,m.site_scope FROM organisations o JOIN members m ON m.org_id=o.id WHERE m.user_id=? AND m.active=1 ORDER BY o.created_at',user.userId);
-  return json({user:{id:user.userId,name:user.fullName||user.displayName,email:user.email},organisations});
+  const known=await one('SELECT active,user_id FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,user.email.trim().toLowerCase());
+  if(known&&(!known.active||known.user_id&&known.user_id!==user.userId))throw new HttpError(403,'Your BMSIT membership is unavailable or has been deactivated. Contact the BMSIT administrator.');
+  const organisations=await all('SELECT o.*,m.id member_id,m.role,m.site_scope FROM organisations o JOIN members m ON m.org_id=o.id WHERE o.id=? AND m.user_id=? AND m.email=? AND m.active=1',PILOT_ORG_ID,user.userId,user.email.trim().toLowerCase());
+  return json({user:{id:user.userId,name:user.fullName||user.displayName,email:user.email},organisations,pilot:{organisationId:PILOT_ORG_ID,domains:PILOT_DOMAINS}});
  }
  const orgId=url.searchParams.get('org')||'',{member}=await membership(orgId);
  if(op==='workspace'){
@@ -51,15 +53,16 @@ export async function POST(request:Request){try{
  }
  let data:any;try{data=await request.json();}catch{throw new HttpError(400,'Invalid request data.');}const action=data.action;
  if(action==='initialise'){
-  await stmt('UPDATE members SET user_id=? WHERE email=? AND user_id IS NULL AND active=1',user.userId,user.email.toLowerCase()).run();
-  if(data.demo)await seedWorkspaces(user);return json({ok:true});
+  if(data.demo)throw new HttpError(403,'Demo workspaces are disabled during the BMSIT pilot.');
+  await initialisePilot(user);return json({ok:true});
  }
  if(action==='create_org'){
-  const d=parse(z.object({name:text,type:z.enum(['College','School','Office','Residential','Other'])}),data);const count=await one('SELECT COUNT(*) n FROM organisations WHERE creator=?',user.userId);if(count.n>=12)throw new HttpError(429,'This prototype supports up to 12 workspaces per account.');return json({orgId:await makeOrganisation(user,d.name,d.type)});
+  throw new HttpError(403,'New organisations are disabled. CampusCare is running the BMSIT pilot only.');
  }
  const orgId=parse(id,data.orgId),{member}=await membership(orgId);
  if(action==='save_settings'){
   admin(member);const d=parse(z.object({name:text,color:z.string().regex(/^#[0-9a-fA-F]{6}$/),max_accuracy:z.number().min(5).max(100),response_hours:z.number().min(1).max(720),emergency_contact:text,identifier_label:text}),data);
+  if(d.name!==PILOT_ORG_NAME)throw new HttpError(400,'The pilot organisation name is fixed to BMSIT.');
   await stmt('UPDATE organisations SET name=?,color=?,max_accuracy=?,response_hours=?,emergency_contact=?,identifier_label=? WHERE id=?',d.name,d.color,d.max_accuracy,d.response_hours,d.emergency_contact,d.identifier_label,orgId).run();return json({ok:true});
  }
  if(action==='save_site'){
@@ -75,6 +78,7 @@ export async function POST(request:Request){try{
  }
  if(action==='invite_member'){
   admin(member);const d=parse(z.object({name:text,email:z.string().email().max(200),role:z.enum(['admin','verifier','technician','reporter']),site_scope:text}),data);if(d.site_scope!=='*')for(const siteId of d.site_scope.split(','))await siteFor(orgId,siteId,member);
+  if(!isPilotEmail(d.email))throw new HttpError(400,PILOT_ACCESS_MESSAGE);
   if(await one('SELECT id FROM members WHERE org_id=? AND email=?',orgId,d.email.toLowerCase()))throw new HttpError(409,'This email is already in the workspace.');await insert('members',{id:uid(),org_id:orgId,email:d.email.toLowerCase(),name:d.name,role:d.role,site_scope:d.site_scope}).run();return json({ok:true});
  }
  if(action==='deactivate_member'){

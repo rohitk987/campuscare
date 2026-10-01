@@ -1,6 +1,6 @@
 # CampusCare
 
-A working multi-organisation facility reporting and maintenance prototype for colleges, schools, offices and other managed sites.
+A facility reporting and maintenance portal, currently restricted to the **BMSIT pilot**. The underlying organisation model is retained for future rollouts.
 
 [Hosted preview](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site) · [GitHub source](https://github.com/rohitk987/campuscare)
 
@@ -10,8 +10,11 @@ The native Android client is in [`android/`](android/README.md). It uses Kotlin 
 
 ## What is implemented
 
-- Separate organisation workspaces with server-checked memberships and site scopes.
-- Fictional college, school and office sample workspaces, clearly labelled as demos.
+- Exactly one accessible organisation: BMSIT, with server-checked memberships and site scopes.
+- Email OTP verification for exact `@bmsit.in` and `@bmsit.ac.in` accounts, with rate limits and single-use expiring codes.
+- Admin-approved student records and active batches with access start/end dates; graduated, suspended, withdrawn and unlisted students are denied.
+- Reporter enrollment only after both current-student approval and email verification. Explicitly approved staff roles also require OTP.
+- Server rejection of other domains, legacy organisations, demo seeding and new organisation creation.
 - Remote login and complaint tracking; location checks apply only to new reports.
 - Admin-configured circular site and building boundaries, with floor and room selection.
 - Mandatory browser camera capture linked to fresh browser geolocation.
@@ -19,28 +22,32 @@ The native Android client is in [`android/`](android/README.md). It uses Kotlin 
 - Duplicate suggestions and following existing shared issues.
 - Staff verification, clarification, assignment, start/hold/resume/resolve/close actions.
 - Reviewed reopening of the same incident with retained event history.
-- Member approval, scoped staff roles, and membership deactivation.
+- Scoped staff roles and membership deactivation; deactivated accounts cannot enroll again automatically.
 - In-app updates to the reporter, operational metrics and CSV export.
-- Organisation settings for name, accent colour, review target, accuracy limit and emergency instructions.
+- Organisation settings for accent colour, review target, accuracy limit and emergency instructions; the pilot name stays BMSIT.
 
 ## Implementation stack
 
 The hosted implementation uses **TypeScript, React, Vinext and a Cloudflare Worker**, with **D1** for relational data and **R2** for photos. This differs from the Django/PostgreSQL stack proposed during design so the complete app can run on the supplied Sites hosting platform. It is a server-backed application; localStorage is not the database.
 
-Authentication is **dispatch-owned ChatGPT sign-in**. It is not a custom college-email/password or institutional SSO implementation. Organisation membership is checked separately from sign-in. An administrator approves the email a member will use to sign in; this version does not send invitation or verification emails. A user must also have access to the deployed Site, which is private to its owner by default.
+Authentication is **dispatch-owned ChatGPT sign-in**. It is not a custom college-email/password or institutional SSO implementation. The signed-in account must use exactly `bmsit.in` or `bmsit.ac.in`; subdomains and lookalike suffixes are rejected. All API operations check this trusted identity on the server. Successful ChatGPT sign-in with another domain does not grant CampusCare access.
+
+The shared login page can be opened by link; complaints, evidence and administration require a BMSIT identity, email OTP, current eligibility and the appropriate active membership. GPS is requested only for new complaints, never for sign-in or tracking.
+
+The initial administrator's official email is configured through the hosted secret `BMSIT_ADMIN_EMAIL`. It is never supplied by the browser. The first ordinary visitor never becomes administrator. Other approved current students become reporters after OTP verification; pre-approved staff invitations retain their assigned roles. Existing inactive or already-claimed invitations cannot be reclaimed.
 
 ## First use
 
-1. Sign in. A first-time account without an approved membership receives three private demo workspaces.
-2. Open the organisation selector in the sidebar. Explore the sample complaint workflows or create a new workspace.
+1. Configure the verified email sender and email-service API key. The administrator address and OTP hashing secret are already configured for the hosted pilot. Follow [BMSIT access setup](docs/BMSIT-ACCESS-SETUP.md).
+2. Sign in through ChatGPT using the designated administrator BMSIT email and verify the OTP. In **Student access**, configure the confirmed current batches and approved student records. Students need an active record, an enabled batch within its dates and a mailbox OTP before enrollment.
 3. In **Locations**, add a site using its centre latitude/longitude and radius. Enable reporting when the approved boundary is correct.
 4. Add buildings/zones with their own centre and radius, followed by floors/rooms/areas. `Outdoor` can be used as a level. Individual asset inventories and QR labels are not required.
 5. In **Settings**, configure emergency instructions, location accuracy tolerance and a review target. Test location behaviour on the actual site.
-6. In **People**, approve users and assign roles/site access. Sample maintenance users use `example.invalid` addresses and cannot sign in.
+6. In **People**, add staff roles/site access using official BMSIT emails before those staff members first sign in. Student eligibility requires an approved roster record; staff roles are explicitly approved. Member deactivation immediately blocks subsequent API access.
 7. A member selects **Report an issue**, passes the location check, chooses the exact area, describes the fault and captures a photo. Evidence expires two minutes after receipt, and reporting sessions expire after 15 minutes.
 8. A verifier checks the issue. An administrator assigns it; maintenance staff update progress. The reporter can confirm resolution or request reopening from anywhere.
 
-Sample workspaces deliberately have **unconfigured reporting boundaries**. They do not silently claim a user is on a real campus. Existing sample tickets have no fabricated GPS/photo evidence. New reports, even inside a demo workspace, must pass the actual application checks.
+BMSIT starts without invented coordinates or sample complaints. Configure real site/building boundaries and rooms before reporting. Previous demo data is retained in storage but inaccessible during the pilot.
 
 ## Local development
 
@@ -50,10 +57,11 @@ Use Node.js 22.13+ (Node 24+ recommended), npm, and a browser with camera/locati
 npm ci
 npm run build
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_flaky_talisman.sql
+node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_rare_wind_dancer.sql
 npm run dev
 ```
 
-Apply each migration once, in filename order. The local server normally prints `http://127.0.0.1:5173/`. In development, `/signin-with-chatgpt?return_to=/` supplies the starter's local test identity. That development identity mechanism is excluded from production builds. Never expose the local development server as a public production service.
+Apply each migration once, in filename order. The local server normally prints `http://127.0.0.1:5173/`. The starter's default local identity (`seedy@sites.test`) is intentionally rejected by the pilot policy. `tests/pilot-access.test.mjs` exercises real API handlers and SQLite with a test-only trusted identity substitute; no such substitute is shipped. Configure `BMSIT_ADMIN_EMAIL` through the local Worker environment for a supported local BMSIT identity. Never expose the local development server as a public production service.
 
 If the Windows npm command shim fails, invoke its JavaScript entrypoint using your installed Node/npm paths, or use `node scripts/run-framework.mjs dev` after dependencies have been installed.
 
@@ -63,11 +71,11 @@ Local camera access works on loopback in supporting browsers. Other devices need
 
 ```sh
 node node_modules/typescript/bin/tsc --noEmit
-node --test tests/domain.test.mjs
+node --test tests/domain.test.mjs tests/pilot-access.test.mjs
 npm run build
 ```
 
-The included 14 domain tests cover location freshness/accuracy/boundaries, building ambiguity, site scope, role restrictions and state transitions. Browser/API checks performed during the build are recorded in `tests/acceptance.md`.
+The 14 domain tests cover location and workflow rules. Twenty-two pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. All 36 tests passed; real email delivery remains unverified until the email service is configured. Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
 
 ## Application structure
 
@@ -80,7 +88,11 @@ app/api/campuscare/route.ts        authenticated API, access checks and persiste
 app/chatgpt-auth.ts              platform authentication integration
 lib/domain.ts                   pure location and workflow rules
 lib/server.ts                   prepared D1 statements and authorisation helpers
-lib/seed.ts                     fictional demo data, isolated per account
+lib/pilot.ts                    fixed BMSIT organisation and exact email-domain policy
+lib/access.ts                   email OTP, session and enrollment eligibility checks
+app/api/access/route.ts          OTP and administrator-only student/batch API
+app/access-panel.tsx             mailbox verification and student access screens
+lib/seed.ts                     historical demo helpers; not reachable from the pilot API
 db/schema.ts                    schema definitions
 drizzle/                        generated schema migrations
 tests/domain.test.mjs            security and workflow unit tests
@@ -88,7 +100,7 @@ tests/domain.test.mjs            security and workflow unit tests
 
 ## Data and access rules
 
-- Requests are authenticated by the hosting dispatcher; organisation IDs supplied by clients are only selectors. An active membership is required on every tenant-specific request.
+- Requests are authenticated by the hosting dispatcher; organisation IDs supplied by clients are only selectors. Every protected request requires exact-domain identity, a verified OTP session, current student eligibility or explicit staff approval, and active membership.
 - Organisation administrators and verifiers see records within their authorised scopes. Technicians can act on their own assigned jobs. Reporters can see their own tickets and limited shared summaries.
 - Evidence, detailed reporter information and event notes are hidden from other ordinary members. School submissions and private-area submissions are forced private.
 - All writes require the application request header and a same-origin check when an Origin header is present. Database values use prepared statements.
@@ -108,6 +120,6 @@ This is a functional prototype, not a claim of production certification.
 - This build does not configure automated backups, restores, retention jobs or orphan-upload cleanup. Establish and test these before collecting real evidence at scale. Protect credentials, configure customer access, and review applicable institutional requirements before a pilot.
 - Production deployment uses logical `DB` and `BUCKET` bindings in `.openai/hosting.json`; Sites provisions resources and applies migrations. Existing migration history must not be rewritten after deployment.
 
-## Demo walkthrough
+## Earlier previews
 
-Switch among **Northstar Institute**, **Cedar Grove School** and **Meridian Offices** to show configuration and data separation. Review a sample pending complaint, assign it, progress the repair, resolve it, and record a reopening review. Then demonstrate a new report on a deliberately configured test site, explaining that browser locations are supporting evidence rather than anti-spoofing guarantees.
+The Android first-preview release and its recorded tests predate the BMSIT restriction. Its native client uses the same server, so the current domain, OTP, enrollment and organisation restrictions also apply to it. The older organisation-creation controls cannot bypass the server's pilot policy. Its sign-in WebView shares cookies with native requests and can show the website's verification screen, followed by **Check sign-in**. This flow has not been retested with actual OTP delivery; the historical Android results do not establish current login readiness. Repeating the historical Android multi-organisation tests requires their tagged source/backend, not the restricted pilot backend.

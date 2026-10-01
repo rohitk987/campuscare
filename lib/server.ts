@@ -1,6 +1,8 @@
 import {env} from 'cloudflare:workers';
-import {getChatGPTUser} from '@/app/chatgpt-auth';
+import {getChatGPTUser,type ChatGPTUser} from '@/app/chatgpt-auth';
 import {withinScope} from './domain';
+import {PILOT_ORG_ID,PILOT_ORG_NAME,PILOT_ACCESS_MESSAGE,isPilotEmail,normaliseEmail} from './pilot';
+import {requireVerifiedAccess} from './access';
 export const uid=()=>crypto.randomUUID();
 export class HttpError extends Error{constructor(public status:number,message:string){super(message)}}
 export const db=()=>{if(!env.DB)throw new HttpError(503,'Saved data is temporarily unavailable. Please retry.');return env.DB;};
@@ -9,8 +11,22 @@ export const stmt=(sql:string,...params:any[])=>db().prepare(sql).bind(...params
 export function insert(table:string,values:Record<string,any>){const keys=Object.keys(values);return stmt(`INSERT INTO ${table} (${keys.map(k=>'"'+k+'"').join(',')}) VALUES (${keys.map(()=>'?').join(',')})`,...keys.map(k=>values[k]));}
 export async function all(sql:string,...params:any[]){return (await stmt(sql,...params).all()).results as any[];}
 export async function one(sql:string,...params:any[]){return await stmt(sql,...params).first() as any;}
-export async function identity(){const u=await getChatGPTUser();if(!u)throw new HttpError(401,'Sign in to access your workspaces.');return u;}
-export async function membership(orgId:string){const user=await identity();const member=await one('SELECT * FROM members WHERE org_id=? AND user_id=? AND active=1',orgId,user.userId);if(!member)throw new HttpError(403,'You do not have access to this workspace.');return {user,member};}
+export async function authenticatedIdentity():Promise<ChatGPTUser>{const u=await getChatGPTUser();if(!u)throw new HttpError(401,'Sign in to access CampusCare.');if(!isPilotEmail(u.email))throw new HttpError(403,PILOT_ACCESS_MESSAGE);if(await one('SELECT id FROM members WHERE org_id=? AND active=0 AND (user_id=? OR email=?)',PILOT_ORG_ID,u.userId,normaliseEmail(u.email)))throw new HttpError(403,'Your BMSIT account has been deactivated. Contact the administrator.');if(await one('SELECT id FROM members WHERE org_id=? AND email=? AND user_id IS NOT NULL AND user_id<>?',PILOT_ORG_ID,normaliseEmail(u.email),u.userId))throw new HttpError(403,'This BMSIT email is already linked to another account. Contact the administrator.');return u;}
+export async function identity():Promise<ChatGPTUser>{const user=await authenticatedIdentity();await requireVerifiedAccess(user);return user;}
+export async function membership(orgId:string){const user=await identity();if(orgId!==PILOT_ORG_ID)throw new HttpError(403,'Only the BMSIT workspace is available during this pilot.');const member=await one('SELECT * FROM members WHERE org_id=? AND user_id=? AND email=? AND active=1',orgId,user.userId,normaliseEmail(user.email));if(!member)throw new HttpError(403,'Your BMSIT membership is unavailable or has been deactivated. Contact the BMSIT administrator.');return {user,member};}
+export async function initialisePilot(user:Awaited<ReturnType<typeof identity>>){
+ if(!isPilotEmail(user.email))throw new HttpError(403,PILOT_ACCESS_MESSAGE);
+ await requireVerifiedAccess(user);
+ const email=normaliseEmail(user.email),configuredAdmin=normaliseEmail(env.BMSIT_ADMIN_EMAIL||'');
+ if(configuredAdmin&&!isPilotEmail(configuredAdmin))throw new HttpError(503,'The BMSIT administrator configuration needs attention.');
+ // Seed records, never schema. The stable ID and unique email constraint make first sign-ins idempotent.
+ await stmt('INSERT INTO organisations (id,name,type,creator,created_at,identifier_label) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',PILOT_ORG_ID,PILOT_ORG_NAME,'College','bmsit-pilot-setup',Date.now(),'USN').run();
+ if(configuredAdmin)await stmt('INSERT INTO members (id,org_id,email,name,role) VALUES (?,?,?,?,?) ON CONFLICT(org_id,email) DO NOTHING',uid(),PILOT_ORG_ID,configuredAdmin,'BMSIT administrator','admin').run();
+ await stmt('INSERT INTO members (id,org_id,user_id,email,name,role) VALUES (?,?,?,?,?,?) ON CONFLICT(org_id,email) DO NOTHING',uid(),PILOT_ORG_ID,user.userId,email,user.fullName||user.displayName,'reporter').run();
+ // Never reactivate a suspended member, change a role, or transfer an already-bound identity.
+ await stmt('UPDATE members SET user_id=?,name=? WHERE org_id=? AND email=? AND user_id IS NULL AND active=1',user.userId,user.fullName||user.displayName,PILOT_ORG_ID,email).run();
+ return membership(PILOT_ORG_ID);
+}
 export function admin(m:any){if(m.role!=='admin')throw new HttpError(403,'An organisation administrator is required.');}
 export function siteAccess(m:any,siteId:string){if(!withinScope(m,siteId))throw new HttpError(403,'This site is not in your assigned access scope.');}
 export function mutateRequest(request:Request){const origin=request.headers.get('origin'),host=new URL(request.url).host;if(origin&&new URL(origin).host!==host)throw new HttpError(403,'Cross-site requests are not allowed.');if(request.headers.get('x-campuscare-request')!=='1')throw new HttpError(403,'Invalid request.');}
