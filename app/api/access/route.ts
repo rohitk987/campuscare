@@ -7,7 +7,7 @@ const json=(data:any,headers:Record<string,string>={})=>Response.json(data,{head
 function parse<T>(schema:z.ZodType<T>,data:unknown):T{const result=schema.safeParse(data);if(!result.success)throw new HttpError(400,'Check the required fields and dates.');return result.data;}
 export async function GET(request:Request){try{
  const op=new URL(request.url).searchParams.get('op')||'status';
- if(op==='status'){const user=await authenticatedIdentity();await assertEligibility(user);return json({email:normaliseEmail(user.email),verified:await hasVerifiedSession(user),configured:mailConfigured(),challenge:await verificationChallenge(user)});}
+ if(op==='status'){const user=await authenticatedIdentity();await assertEligibility(user);return json({userId:user.userId,email:normaliseEmail(user.email),verified:await hasVerifiedSession(user),configured:mailConfigured(),challenge:await verificationChallenge(user)});}
  if(op==='students'){const {member}=await membership(PILOT_ORG_ID);admin(member);return json({cohorts:await all('SELECT * FROM cohorts WHERE org_id=? ORDER BY admission_year DESC',PILOT_ORG_ID),students:await all('SELECT s.*,c.name cohort_name FROM student_records s JOIN cohorts c ON c.id=s.cohort_id AND c.org_id=s.org_id WHERE s.org_id=? ORDER BY s.name LIMIT 2000',PILOT_ORG_ID)});}
  throw new HttpError(404,'Unknown request.');
  }catch(error){return safeError(error);}}

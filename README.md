@@ -71,11 +71,11 @@ Local camera access works on loopback in supporting browsers. Other devices need
 
 ```sh
 node node_modules/typescript/bin/tsc --noEmit
-node --test tests/domain.test.mjs tests/pilot-access.test.mjs
+node --test tests/domain.test.mjs tests/pilot-access.test.mjs tests/client-access.test.mjs
 npm run build
 ```
 
-The 14 domain tests cover location and workflow rules. Twenty-two pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. All 36 tests passed; real email delivery remains unverified until the email service is configured. Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
+The 14 domain tests cover location and workflow rules. Twenty-two pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Four client tests execute the root component's access effects, checking cross-tab account switching and delayed responses without allowing old privileged data to return. All 40 tests passed; real email delivery remains unverified until the email service is configured. Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
 
 ## Application structure
 

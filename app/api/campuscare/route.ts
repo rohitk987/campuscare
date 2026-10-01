@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {all,one,stmt,db,bucket,uid,identity,membership,initialisePilot,admin,siteAccess,ticketAccess,mutateRequest,safeError,HttpError,insert} from '@/lib/server';
 import {categories,roles,checkPosition,buildingCandidates,withinScope,transition,statusLabel} from '@/lib/domain';
-import {PILOT_ORG_ID,PILOT_ORG_NAME,PILOT_DOMAINS,PILOT_ACCESS_MESSAGE,isPilotEmail} from '@/lib/pilot';
+import {PILOT_ORG_ID,PILOT_ORG_NAME,PILOT_DOMAINS,PILOT_ACCESS_MESSAGE,isPilotEmail,normaliseEmail} from '@/lib/pilot';
 export const dynamic='force-dynamic';
 const text=z.string().trim().min(1).max(200),id=text,position=z.object({latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),accuracy:z.number().positive(),timestamp:z.number()});
 const json=(value:any)=>Response.json(value,{headers:{'Cache-Control':'no-store'}});
@@ -27,7 +27,7 @@ export async function GET(request:Request){try{
   const members=member.role==='admin'?await all('SELECT id,name,email,role,site_scope,active,user_id FROM members WHERE org_id=? ORDER BY name',orgId):[];
   const notifications=await all('SELECT * FROM notifications WHERE org_id=? AND user_id=? ORDER BY created_at DESC LIMIT 30',orgId,user.userId);
   const following=(await all('SELECT complaint_id FROM followers WHERE org_id=? AND user_id=?',orgId,user.userId)).map(f=>f.complaint_id);
-  return json({sites,buildings,locations,tickets,members,member,notifications,following,categories});
+  return json({sites,buildings,locations,tickets,members,member,notifications,following,categories,accessIdentity:{id:user.userId,email:normaliseEmail(user.email)}});
  }
  if(op==='detail'){
   const {t,full,own}=await ticketAccess(orgId,url.searchParams.get('id')||'');const events=full?await all('SELECT * FROM events WHERE org_id=? AND complaint_id=? ORDER BY created_at',orgId,t.id):[];
