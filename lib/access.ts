@@ -3,7 +3,7 @@ import {headers} from 'next/headers';
 import type {ChatGPTUser} from '@/app/chatgpt-auth';
 import {db,stmt,one,HttpError,uid} from './server';
 import {PILOT_ORG_ID,isPilotEmail,normaliseEmail} from './pilot';
-import {deliverVerificationCode} from './mail';
+import {deliverVerificationCode,mailFailureDetails} from './mail';
 import {mailConfigured} from './mail';
 export {mailConfigured} from './mail';
 
@@ -58,10 +58,13 @@ export async function sendVerificationCode(user:ChatGPTUser){
  send_count=CASE WHEN otp_challenges.window_started_at<=? THEN 1 ELSE otp_challenges.send_count+1 END
  WHERE otp_challenges.last_sent_at<=? AND (otp_challenges.window_started_at<=? OR otp_challenges.send_count<5) RETURNING challenge_id`,user.userId,email,id,hash,now+CODE_TTL,now,now,now-3_600_000,now-3_600_000,now-60_000,now-3_600_000);
  if(!reserved)throw new HttpError(429,'Wait at least one minute between codes. A maximum of five codes can be sent per hour.');
+ let providerAccepted=false;
  try{
   await deliverVerificationCode(email,code,id);
+  providerAccepted=true;
   await stmt("UPDATE otp_challenges SET delivery='sent' WHERE user_id=? AND challenge_id=?",user.userId,id).run();
- }catch{
+ }catch(error){
+  console.error('CampusCare email delivery failed',providerAccepted?{stage:'delivery_db',status:0,reason:'update_failed'}:mailFailureDetails(error));
   await stmt("UPDATE otp_challenges SET delivery='failed',code_hash='',expires_at=0 WHERE user_id=? AND challenge_id=?",user.userId,id).run();
   throw new HttpError(503,'The verification email could not be sent. Please retry later or contact the administrator.');
  }

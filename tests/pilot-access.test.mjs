@@ -7,15 +7,15 @@ import {isPilotEmail, PILOT_ORG_ID} from '../lib/pilot.ts';
 
 // Run the production API handlers and migrations with a trusted identity substitute,
 // transactional SQLite D1 adapter, and synthetic email delivery. Nothing is sent.
-let database, visitor=null, cookie='', emails=[], deliveryStatus=200;
+let database, visitor=null, cookie='', emails=[], deliveryStatus=200,failSentUpdate=false;
 const SEND_SCOPE='https://www.googleapis.com/auth/gmail.send';
-let gmailTokenStatus=200,gmailScope='openid email '+SEND_SCOPE,gmailSender='',gmailIdentityStatus=200,gmailVerified=true,gmailMessageId='synthetic-gmail-id',providerCalls=[];
+let gmailTokenStatus=200,gmailScope='openid email '+SEND_SCOPE,gmailSender='',gmailIdentityStatus=200,gmailVerified=true,gmailFailureReason='',gmailMessageId='synthetic-gmail-id',providerCalls=[];
 const actualNow=Date.now, actualFetch=globalThis.fetch;
 let now=actualNow();
 const ADMIN='24ug1bybs030@bmsit.in';
 const state={env:{},getUser:async()=>visitor,getHeaders:async()=>new Headers({cookie})};
 function prepared(sql,values=[]){
- const execute=()=>({meta:{changes:Number(database.prepare(sql).run(...values).changes)}});
+ const execute=()=>{if(failSentUpdate&&sql.startsWith("UPDATE otp_challenges SET delivery='sent'")){failSentUpdate=false;throw new Error('synthetic database failure');}return {meta:{changes:Number(database.prepare(sql).run(...values).changes)}};};
  return {bind:(...next)=>prepared(sql,next),first:async()=>database.prepare(sql).get(...values)??null,all:async()=>({results:database.prepare(sql).all(...values)}),run:async()=>execute(),execute};
 }
 state.env.DB={prepare:prepared,batch:async statements=>{
@@ -41,7 +41,7 @@ globalThis.fetch=async(url,options)=>{
   assert.ok(mime.includes(`From: CampusCare <${state.env.GMAIL_SENDER_EMAIL}>\r\n`));
   assert.ok(mime.includes('Content-Type: text/plain; charset=UTF-8\r\n'));
   emails.push({email,code});
-  return Response.json(deliveryStatus===200?{id:gmailMessageId}:{error:{message:'synthetic send failure'}},{status:deliveryStatus});
+  return Response.json(deliveryStatus===200?{id:gmailMessageId}:{error:{message:'private-provider-body',errors:[{reason:gmailFailureReason}]}},{status:deliveryStatus});
  }
  assert.equal(url,'https://api.resend.com/emails');
  const message=JSON.parse(options.body);
@@ -80,7 +80,7 @@ async function signIn(email,id=email){
 }
 beforeEach(()=>{
  database?.close();database=new DatabaseSync(':memory:');for(const migration of migrations)database.exec(migration);
- now=actualNow();visitor=null;cookie='';emails=[];deliveryStatus=200;gmailTokenStatus=200;gmailScope='openid email '+SEND_SCOPE;gmailSender=ADMIN;gmailIdentityStatus=200;gmailVerified=true;gmailMessageId='synthetic-gmail-id';providerCalls=[];
+ now=actualNow();visitor=null;cookie='';emails=[];deliveryStatus=200;failSentUpdate=false;gmailTokenStatus=200;gmailScope='openid email '+SEND_SCOPE;gmailSender=ADMIN;gmailIdentityStatus=200;gmailVerified=true;gmailFailureReason='';gmailMessageId='synthetic-gmail-id';providerCalls=[];
  delete state.env.GMAIL_CLIENT_ID;delete state.env.GMAIL_CLIENT_SECRET;delete state.env.GMAIL_REFRESH_TOKEN;delete state.env.GMAIL_SENDER_EMAIL;
  state.env.OTP_MAIL_PROVIDER='resend';
  Object.assign(state.env,{BMSIT_ADMIN_EMAIL:ADMIN,RESEND_API_KEY:'synthetic-test-key',OTP_FROM_EMAIL:'CampusCare Test <otp@example.test>',OTP_HMAC_SECRET:'synthetic-test-secret-only-at-least-32-characters'});
@@ -276,4 +276,26 @@ test('incomplete Gmail configuration and invalid sender headers cannot fall back
  configureGmail();visitor=user(ADMIN);delete state.env.GMAIL_REFRESH_TOKEN;assert.equal((await accessPost('send_code')).status,503);
  state.env.GMAIL_REFRESH_TOKEN='synthetic-refresh-token';state.env.GMAIL_SENDER_EMAIL=ADMIN+'\r\nBcc: attacker@gmail.com';assert.equal((await accessPost('send_code')).status,503);
  state.env.OTP_MAIL_PROVIDER='unknown';assert.equal((await accessPost('send_code')).status,503);assert.equal(providerCalls.length,0);
+});
+test('email diagnostics expose only a fixed stage, HTTP status and allowlisted error category',async()=>{
+ configureGmail();visitor=user(ADMIN);deliveryStatus=429;gmailFailureReason='rateLimitExceeded';
+ const logs=[],original=console.error;console.error=(...values)=>logs.push(values);
+ try{
+  const response=await accessPost('send_code');assert.equal(response.status,503);
+  assert.deepEqual(logs[0],['CampusCare email delivery failed',{stage:'send',status:429,reason:'rateLimitExceeded'}]);
+  now+=60_001;gmailFailureReason='unexpected-secret-reason';await accessPost('send_code');
+  assert.equal(logs[1][1].reason,'unclassified');
+  assert.doesNotMatch(JSON.stringify(logs),/private-provider-body|unexpected-secret|synthetic-client-secret|synthetic-refresh-token/);
+  assert.doesNotMatch(await response.text(),/rateLimitExceeded|private-provider|synthetic/);
+ }finally{console.error=original;}
+});
+test('provider acceptance followed by a database failure invalidates the code and identifies the database stage',async()=>{
+ configureGmail();visitor=user(ADMIN);failSentUpdate=true;
+ const logs=[],original=console.error;console.error=(...values)=>logs.push(values);
+ try{
+  assert.equal((await accessPost('send_code')).status,503);assert.equal(emails.length,1);
+  const failed=row('SELECT * FROM otp_challenges');assert.equal(failed.delivery,'failed');assert.equal(failed.code_hash,'');assert.equal(failed.expires_at,0);
+  assert.deepEqual(logs[0],['CampusCare email delivery failed',{stage:'delivery_db',status:0,reason:'update_failed'}]);
+  assert.equal((await verify({challengeId:failed.challenge_id,code:emails[0].code})).status,400);
+ }finally{console.error=original;}
 });

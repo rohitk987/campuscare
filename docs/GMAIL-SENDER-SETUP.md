@@ -36,4 +36,6 @@ If Google refuses project creation or sender authorization, request the necessar
 
 Automated tests mock Google's HTTP responses. They establish provider integration, scope/identity checks and failure behavior; they cannot establish actual inbox delivery. Google authorization alone also does not complete this test.
 
+When a live send fails, the hosting Worker logs record a fixed failure stage, HTTP status and an allowlisted provider error category. They never record OTPs, MIME bodies, tokens, credentials or raw provider messages. A `delivery_db` failure means the provider accepted the message but recording its acceptance failed; that code is invalidated. Use one controlled retry to obtain diagnostics rather than exhausting the five-per-hour limit.
+
 References: [Gmail sending](https://developers.google.com/workspace/gmail/api/guides/sending), [OAuth for Desktop apps](https://developers.google.com/identity/protocols/oauth2/native-app), [OAuth consent configuration](https://developers.google.com/workspace/guides/configure-oauth-consent), [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes).
