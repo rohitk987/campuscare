@@ -25,7 +25,7 @@ globalThis.__campuscarePilotTest=state;
 globalThis.fetch=async(url,options)=>{
  providerCalls.push(url);
  if(url==='https://oauth2.googleapis.com/token'){
-  assert.equal(options.redirect,'error');assert.equal(options.body.get('grant_type'),'refresh_token');
+  assert.equal(options.redirect,'manual');assert.equal(options.body.get('grant_type'),'refresh_token');
   assert.equal(options.body.get('refresh_token'),'synthetic-refresh-token');
   return Response.json(gmailTokenStatus===200?{access_token:'synthetic-access-token',token_type:'Bearer',scope:gmailScope}:{error:'invalid_grant'}, {status:gmailTokenStatus});
  }
@@ -34,7 +34,7 @@ globalThis.fetch=async(url,options)=>{
   return Response.json({email:gmailSender,email_verified:gmailVerified},{status:gmailIdentityStatus});
  }
  if(url==='https://gmail.googleapis.com/gmail/v1/users/me/messages/send'){
-  assert.equal(options.headers.Authorization,'Bearer synthetic-access-token');assert.equal(options.redirect,'error');
+  assert.equal(options.headers.Authorization,'Bearer synthetic-access-token');assert.equal(options.redirect,'manual');
   const raw=JSON.parse(options.body).raw;assert.match(raw,/^[A-Za-z0-9_-]+$/);
   const mime=Buffer.from(raw,'base64url').toString('utf8');
   const email=mime.match(/^To: <([^>]+)>\r?$/m)[1],code=mime.match(/code is ([0-9]{6})/)[1];

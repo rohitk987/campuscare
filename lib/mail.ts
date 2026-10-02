@@ -32,7 +32,11 @@ async function providerFailure(response:Response,stage:MailStage){
  return new MailDeliveryError(stage,response.status,reason);
 }
 async function mailFetch(stage:MailStage,url:string,options:RequestInit){
- try{return await fetch(url,options);}catch(error){throw new MailDeliveryError(stage,0,error instanceof Error&&['TimeoutError','AbortError'].includes(error.name)?'timeout':'network_error');}
+ let response:Response;
+ // workerd supports manual/follow only. Never follow a redirect with credentials.
+ try{response=await fetch(url,{...options,redirect:'manual'});}catch(error){throw new MailDeliveryError(stage,0,error instanceof Error&&['TimeoutError','AbortError'].includes(error.name)?'timeout':'network_error');}
+ if(response.status>=300&&response.status<400)throw new MailDeliveryError(stage,response.status,'redirect_blocked');
+ return response;
 }
 // Only a bare ASCII mailbox can enter a MIME header. Reject lists and header injection.
 const mailbox=/^[a-z0-9.!#$%&'*+\/=\?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i;
@@ -63,7 +67,7 @@ export async function deliverVerificationCode(email:string,code:string,challenge
   const tokenResponse=await mailFetch('token','https://oauth2.googleapis.com/token',{
    method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
    body:new URLSearchParams({client_id:env.GMAIL_CLIENT_ID!,client_secret:env.GMAIL_CLIENT_SECRET!,refresh_token:env.GMAIL_REFRESH_TOKEN!,grant_type:'refresh_token'}),
-   signal:AbortSignal.timeout(15_000),redirect:'error',
+   signal:AbortSignal.timeout(15_000),
   });
   if(!tokenResponse.ok)throw await providerFailure(tokenResponse,'token');
   const token=await responseObject(tokenResponse,'token_validation');
@@ -71,7 +75,7 @@ export async function deliverVerificationCode(email:string,code:string,challenge
    typeof token.scope!=='string'||!token.scope.split(' ').includes(SEND_SCOPE))
    throw new MailDeliveryError('token_validation',tokenResponse.status,'missing_send_permission');
   const identityResponse=await mailFetch('userinfo','https://openidconnect.googleapis.com/v1/userinfo',{
-   headers:{Authorization:'Bearer '+token.access_token},signal:AbortSignal.timeout(15_000),redirect:'error',
+   headers:{Authorization:'Bearer '+token.access_token},signal:AbortSignal.timeout(15_000),
   });
   if(!identityResponse.ok)throw await providerFailure(identityResponse,'userinfo');
   const identity=await responseObject(identityResponse,'sender_match');
@@ -83,7 +87,7 @@ export async function deliverVerificationCode(email:string,code:string,challenge
    'MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: 7bit','',text].join('\r\n');
   const response=await mailFetch('send','https://gmail.googleapis.com/gmail/v1/users/me/messages/send',{
    method:'POST',headers:{Authorization:'Bearer '+token.access_token,'Content-Type':'application/json'},
-   body:JSON.stringify({raw:base64url(mime)}),signal:AbortSignal.timeout(20_000),redirect:'error',
+   body:JSON.stringify({raw:base64url(mime)}),signal:AbortSignal.timeout(20_000),
   });
   if(!response.ok)throw await providerFailure(response,'send');
   const result=await responseObject(response,'acceptance');
@@ -93,7 +97,7 @@ export async function deliverVerificationCode(email:string,code:string,challenge
  }
  const response=await mailFetch('resend','https://api.resend.com/emails',{
   method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'campuscare-otp/'+challengeId},
-  body:JSON.stringify({from:env.OTP_FROM_EMAIL,to:[email],subject,text}),signal:AbortSignal.timeout(20_000),redirect:'error',
+  body:JSON.stringify({from:env.OTP_FROM_EMAIL,to:[email],subject,text}),signal:AbortSignal.timeout(20_000),
  });
  if(!response.ok)throw await providerFailure(response,'resend');
  const result=await responseObject(response,'acceptance');

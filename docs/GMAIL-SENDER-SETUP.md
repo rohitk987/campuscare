@@ -34,7 +34,7 @@ If Google refuses project creation or sender authorization, request the necessar
 4. Confirm the verified state and BMSIT workspace, reload to check session persistence, then sign out and confirm that protected access is locked again.
 5. Record pass/fail, time, sender, recipient and observed delivery delay without storing OTPs or session tokens. Then validate an approved current student and the normal enrollment revocation flow.
 
-Automated tests mock Google's HTTP responses. They establish provider integration, scope/identity checks and failure behavior; they cannot establish actual inbox delivery. Google authorization alone also does not complete this test.
+Automated tests mock Google's HTTP responses, including two tests that execute the production mail adapter inside workerd. Provider requests use manual redirect handling and explicitly reject all 3xx responses so credentials are never forwarded to a redirect destination. They establish provider integration, scope/identity checks and failure behavior; they cannot establish actual inbox delivery. Google authorization alone also does not complete this test.
 
 When a live send fails, the hosting Worker logs record a fixed failure stage, HTTP status and an allowlisted provider error category. They never record OTPs, MIME bodies, tokens, credentials or raw provider messages. A `delivery_db` failure means the provider accepted the message but recording its acceptance failed; that code is invalidated. Use one controlled retry to obtain diagnostics rather than exhausting the five-per-hour limit.
 
