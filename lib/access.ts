@@ -3,6 +3,9 @@ import {headers} from 'next/headers';
 import type {ChatGPTUser} from '@/app/chatgpt-auth';
 import {db,stmt,one,HttpError,uid} from './server';
 import {PILOT_ORG_ID,isPilotEmail,normaliseEmail} from './pilot';
+import {deliverVerificationCode} from './mail';
+import {mailConfigured} from './mail';
+export {mailConfigured} from './mail';
 
 export const VERIFICATION_COOKIE='__Host-campuscare-verified';
 const CODE_TTL=5*60_000, SESSION_TTL=8*60*60_000;
@@ -14,7 +17,6 @@ async function codeHash(id:string,user:ChatGPTUser,code:string){
  const key=await crypto.subtle.importKey('raw',encoder.encode(env.OTP_HMAC_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);
  return hex(await crypto.subtle.sign('HMAC',key,encoder.encode(JSON.stringify([id,user.userId,normaliseEmail(user.email),code]))));
 }
-export function mailConfigured(){return !!env.RESEND_API_KEY&&!!env.OTP_FROM_EMAIL&&!!env.OTP_HMAC_SECRET&&env.OTP_HMAC_SECRET.length>=32;}
 function cookieValue(value:string){return value.split(';').map(part=>part.trim()).find(part=>part.startsWith(VERIFICATION_COOKIE+'='))?.slice(VERIFICATION_COOKIE.length+1)||'';}
 async function currentToken(){return cookieValue((await headers()).get('cookie')||'');}
 export async function assertEligibility(user:ChatGPTUser){
@@ -57,8 +59,7 @@ export async function sendVerificationCode(user:ChatGPTUser){
  WHERE otp_challenges.last_sent_at<=? AND (otp_challenges.window_started_at<=? OR otp_challenges.send_count<5) RETURNING challenge_id`,user.userId,email,id,hash,now+CODE_TTL,now,now,now-3_600_000,now-3_600_000,now-60_000,now-3_600_000);
  if(!reserved)throw new HttpError(429,'Wait at least one minute between codes. A maximum of five codes can be sent per hour.');
  try{
-  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'campuscare-otp/'+id},body:JSON.stringify({from:env.OTP_FROM_EMAIL,to:[email],subject:'Your CampusCare BMSIT verification code',text:`Your CampusCare verification code is ${code}. It expires in 5 minutes. Do not share this code. If you did not request it, ignore this email.`}),signal:AbortSignal.timeout(20_000)});
-  if(!response.ok)throw new Error('Email service rejected delivery');
+  await deliverVerificationCode(email,code,id);
   await stmt("UPDATE otp_challenges SET delivery='sent' WHERE user_id=? AND challenge_id=?",user.userId,id).run();
  }catch{
   await stmt("UPDATE otp_challenges SET delivery='failed',code_hash='',expires_at=0 WHERE user_id=? AND challenge_id=?",user.userId,id).run();

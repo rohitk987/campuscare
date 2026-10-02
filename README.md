@@ -71,11 +71,11 @@ Local camera access works on loopback in supporting browsers. Other devices need
 
 ```sh
 node node_modules/typescript/bin/tsc --noEmit
-node --test tests/domain.test.mjs tests/pilot-access.test.mjs tests/client-access.test.mjs
+node --test tests/*.test.mjs
 npm run build
 ```
 
-The 14 domain tests cover location and workflow rules. Twenty-six pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Roster search runs on the server and returns pages of 100 records, so administrators can find and suspend records beyond the original 2,000-row limit. Four client tests execute the root component's access effects, checking cross-tab account switching and delayed responses without allowing old privileged data to return. All 44 web tests passed; real email delivery remains unverified until the email service is configured. Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
+The 14 domain tests cover location and workflow rules. Thirty-two pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Gmail tests cover verified sender matching, scope checks, revoked authorization, identity-service failure, rejected delivery and configuration/header validation. Roster search runs on the server and returns pages of 100 records, so administrators can find and suspend records beyond the original 2,000-row limit. Four client tests check cross-tab account switching and delayed responses without allowing old privileged data to return. Four OAuth setup tests check Desktop client parsing, state/PKCE, callback validation and token/identity checks. The 54 automated tests use synthetic provider responses; real delivery remains unverified until sender authorization and an actual inbox test succeed. See [Gmail sender setup](docs/GMAIL-SENDER-SETUP.md). Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
 
 ## Application structure
 

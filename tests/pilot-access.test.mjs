@@ -8,6 +8,8 @@ import {isPilotEmail, PILOT_ORG_ID} from '../lib/pilot.ts';
 // Run the production API handlers and migrations with a trusted identity substitute,
 // transactional SQLite D1 adapter, and synthetic email delivery. Nothing is sent.
 let database, visitor=null, cookie='', emails=[], deliveryStatus=200;
+const SEND_SCOPE='https://www.googleapis.com/auth/gmail.send';
+let gmailTokenStatus=200,gmailScope='openid email '+SEND_SCOPE,gmailSender='',gmailIdentityStatus=200,gmailVerified=true,gmailMessageId='synthetic-gmail-id',providerCalls=[];
 const actualNow=Date.now, actualFetch=globalThis.fetch;
 let now=actualNow();
 const ADMIN='24ug1bybs030@bmsit.in';
@@ -21,6 +23,26 @@ state.env.DB={prepare:prepared,batch:async statements=>{
 }};
 globalThis.__campuscarePilotTest=state;
 globalThis.fetch=async(url,options)=>{
+ providerCalls.push(url);
+ if(url==='https://oauth2.googleapis.com/token'){
+  assert.equal(options.redirect,'error');assert.equal(options.body.get('grant_type'),'refresh_token');
+  assert.equal(options.body.get('refresh_token'),'synthetic-refresh-token');
+  return Response.json(gmailTokenStatus===200?{access_token:'synthetic-access-token',token_type:'Bearer',scope:gmailScope}:{error:'invalid_grant'}, {status:gmailTokenStatus});
+ }
+ if(url==='https://openidconnect.googleapis.com/v1/userinfo'){
+  assert.equal(options.headers.Authorization,'Bearer synthetic-access-token');
+  return Response.json({email:gmailSender,email_verified:gmailVerified},{status:gmailIdentityStatus});
+ }
+ if(url==='https://gmail.googleapis.com/gmail/v1/users/me/messages/send'){
+  assert.equal(options.headers.Authorization,'Bearer synthetic-access-token');assert.equal(options.redirect,'error');
+  const raw=JSON.parse(options.body).raw;assert.match(raw,/^[A-Za-z0-9_-]+$/);
+  const mime=Buffer.from(raw,'base64url').toString('utf8');
+  const email=mime.match(/^To: <([^>]+)>\r?$/m)[1],code=mime.match(/code is ([0-9]{6})/)[1];
+  assert.ok(mime.includes(`From: CampusCare <${state.env.GMAIL_SENDER_EMAIL}>\r\n`));
+  assert.ok(mime.includes('Content-Type: text/plain; charset=UTF-8\r\n'));
+  emails.push({email,code});
+  return Response.json(deliveryStatus===200?{id:gmailMessageId}:{error:{message:'synthetic send failure'}},{status:deliveryStatus});
+ }
  assert.equal(url,'https://api.resend.com/emails');
  const message=JSON.parse(options.body);
  emails.push({email:message.to[0],code:message.text.match(/code is ([0-9]{6})/)[1]});
@@ -58,7 +80,9 @@ async function signIn(email,id=email){
 }
 beforeEach(()=>{
  database?.close();database=new DatabaseSync(':memory:');for(const migration of migrations)database.exec(migration);
- now=actualNow();visitor=null;cookie='';emails=[];deliveryStatus=200;
+ now=actualNow();visitor=null;cookie='';emails=[];deliveryStatus=200;gmailTokenStatus=200;gmailScope='openid email '+SEND_SCOPE;gmailSender=ADMIN;gmailIdentityStatus=200;gmailVerified=true;gmailMessageId='synthetic-gmail-id';providerCalls=[];
+ delete state.env.GMAIL_CLIENT_ID;delete state.env.GMAIL_CLIENT_SECRET;delete state.env.GMAIL_REFRESH_TOKEN;delete state.env.GMAIL_SENDER_EMAIL;
+ state.env.OTP_MAIL_PROVIDER='resend';
  Object.assign(state.env,{BMSIT_ADMIN_EMAIL:ADMIN,RESEND_API_KEY:'synthetic-test-key',OTP_FROM_EMAIL:'CampusCare Test <otp@example.test>',OTP_HMAC_SECRET:'synthetic-test-secret-only-at-least-32-characters'});
  database.prepare('INSERT INTO organisations(id,name,type,creator,created_at) VALUES(?,?,?,?,?)').run(PILOT_ORG_ID,'BMSIT','College','test-fixture',now);
  database.prepare('INSERT INTO cohorts(id,org_id,name,admission_year,starts_at,ends_at,active) VALUES(?,?,?,?,?,?,?)').run('current-batch',PILOT_ORG_ID,'Synthetic current batch',2024,now-1000,now+86400000,1);
@@ -217,4 +241,39 @@ test('global eligibility rejection is distinct from an ordinary workflow permiss
  approve('student@bmsit.in');await signIn('student@bmsit.in');const forbidden=await post('save_site',{orgId:PILOT_ORG_ID});assert.equal(forbidden.status,403);assert.equal((await forbidden.json()).code,undefined);
  database.prepare("UPDATE student_records SET status='graduated'").run();const denied=await get('op=bootstrap');assert.equal(denied.status,403);assert.equal((await denied.json()).code,'ACCESS_DENIED');
  database.prepare("UPDATE student_records SET status='active'").run();cookie='';const expired=await get('op=bootstrap');assert.equal(expired.status,428);assert.equal((await expired.json()).code,'EMAIL_VERIFICATION_REQUIRED');
+});
+
+function configureGmail(){Object.assign(state.env,{OTP_MAIL_PROVIDER:'gmail',GMAIL_CLIENT_ID:'synthetic-client.apps.googleusercontent.com',GMAIL_CLIENT_SECRET:'synthetic-client-secret',GMAIL_REFRESH_TOKEN:'synthetic-refresh-token',GMAIL_SENDER_EMAIL:ADMIN});}
+test('Gmail authorization sends only to the trusted eligible identity and completes OTP verification',async()=>{
+ configureGmail();visitor=user('student@bmsit.ac.in');approve(visitor.email);
+ const response=await accessPost('send_code',{email:'attacker@gmail.com'});assert.equal(response.status,200);
+ const challenge=await response.json();assert.equal('code' in challenge,false);assert.equal(emails[0].email,visitor.email);
+ assert.deepEqual(providerCalls,['https://oauth2.googleapis.com/token','https://openidconnect.googleapis.com/v1/userinfo','https://gmail.googleapis.com/gmail/v1/users/me/messages/send']);
+ challenge.code=emails[0].code;assert.equal((await verify(challenge)).status,200);
+});
+test('revoked Gmail authorization invalidates the pending code without exposing provider errors',async()=>{
+ configureGmail();visitor=user(ADMIN);gmailTokenStatus=400;
+ const response=await accessPost('send_code');assert.equal(response.status,503);assert.doesNotMatch(await response.text(),/invalid_grant|synthetic-client-secret|synthetic-refresh-token/);
+ const challenge=row('SELECT * FROM otp_challenges');assert.equal(challenge.delivery,'failed');assert.equal(challenge.code_hash,'');assert.equal(challenge.expires_at,0);assert.equal(emails.length,0);
+});
+test('Gmail refuses missing send permission or a different authorized sender',async()=>{
+ configureGmail();visitor=user(ADMIN);gmailScope='openid email';assert.equal((await accessPost('send_code')).status,503);assert.equal(emails.length,0);
+ now+=60_001;gmailScope=SEND_SCOPE;gmailSender='different@gmail.com';assert.equal((await accessPost('send_code')).status,503);assert.equal(emails.length,0);
+ assert.equal(providerCalls.includes('https://gmail.googleapis.com/gmail/v1/users/me/messages/send'),false);
+});
+test('Gmail rejection or malformed acceptance never leaves a usable verification code',async()=>{
+ configureGmail();visitor=user(ADMIN);deliveryStatus=429;assert.equal((await accessPost('send_code')).status,503);assert.equal(row('SELECT delivery FROM otp_challenges').delivery,'failed');
+ now+=60_001;deliveryStatus=200;gmailMessageId='';assert.equal((await accessPost('send_code')).status,503);assert.equal(row('SELECT code_hash FROM otp_challenges').code_hash,'');
+});
+test('Gmail identity service failure or unverified sender prevents sending and invalidates the challenge',async()=>{
+ configureGmail();visitor=user(ADMIN);gmailIdentityStatus=401;
+ assert.equal((await accessPost('send_code')).status,503);assert.equal(row('SELECT code_hash FROM otp_challenges').code_hash,'');
+ now+=60_001;gmailIdentityStatus=200;gmailVerified=false;
+ assert.equal((await accessPost('send_code')).status,503);assert.equal(row('SELECT code_hash FROM otp_challenges').code_hash,'');
+ assert.equal(providerCalls.includes('https://gmail.googleapis.com/gmail/v1/users/me/messages/send'),false);
+});
+test('incomplete Gmail configuration and invalid sender headers cannot fall back to another provider',async()=>{
+ configureGmail();visitor=user(ADMIN);delete state.env.GMAIL_REFRESH_TOKEN;assert.equal((await accessPost('send_code')).status,503);
+ state.env.GMAIL_REFRESH_TOKEN='synthetic-refresh-token';state.env.GMAIL_SENDER_EMAIL=ADMIN+'\r\nBcc: attacker@gmail.com';assert.equal((await accessPost('send_code')).status,503);
+ state.env.OTP_MAIL_PROVIDER='unknown';assert.equal((await accessPost('send_code')).status,503);assert.equal(providerCalls.length,0);
 });

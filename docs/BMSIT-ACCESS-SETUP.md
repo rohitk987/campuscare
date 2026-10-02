@@ -4,16 +4,21 @@ The application now requires three separate checks: a trusted sign-in identity u
 
 ## Email delivery setup
 
-The adapter uses Resend's [Send Email API](https://resend.com/docs/api-reference/emails/send-email). Configure these runtime values through hosting environment management, never in Git or `.openai/hosting.json`:
+The pilot can send through Gmail with Google OAuth, without buying or verifying a sender domain. Configure runtime values through hosting environment management, never in Git or `.openai/hosting.json`:
 
 | Key | Required value |
 | --- | --- |
 | `BMSIT_ADMIN_EMAIL` | `24ug1bybs030@bmsit.in`, the designated setup administrator |
 | `OTP_HMAC_SECRET` | A securely generated secret of at least 32 characters; already configured for the hosted pilot |
-| `RESEND_API_KEY` | An API key from the email-service account used for this pilot |
-| `OTP_FROM_EMAIL` | An approved sender mailbox on a domain verified with Resend |
+| `OTP_MAIL_PROVIDER` | `gmail` for the current pilot |
+| `GMAIL_SENDER_EMAIL` | `24ug1bybs030@bmsit.in`, the selected pilot sender |
+| `GMAIL_CLIENT_ID` | The Google Desktop app OAuth client ID |
+| `GMAIL_CLIENT_SECRET` | The matching OAuth client secret; store as a secret |
+| `GMAIL_REFRESH_TOKEN` | The authorized sender's offline refresh token; store as a secret |
 
-Resend requires [domain verification](https://resend.com/docs/dashboard/domains/introduction). The sender domain can differ from the recipient's college domain. Do not configure a `bmsit.in` or `bmsit.ac.in` sender unless its DNS owner has authorised and completed verification. A service testing address is not a substitute for a verified pilot sender.
+See [Gmail sender setup](GMAIL-SENDER-SETUP.md) for Google project, consent, local authorization and inbox-test steps. Gmail authorization requests `gmail.send` plus `openid email` to confirm the actual sender; it does not request inbox reading. The server confirms the verified Google sender before each send. Revoked authorization, missing permissions and provider failures keep access locked. There is no fallback to a different provider when `gmail` is selected.
+
+The Resend adapter remains available: select `OTP_MAIL_PROVIDER=resend` (also the default when omitted), set secret `RESEND_API_KEY`, and set `OTP_FROM_EMAIL` to an approved mailbox on a [verified sending domain](https://resend.com/docs/dashboard/domains/introduction). Do not configure a college domain for Resend without its DNS owner's authorization. A testing sender is not a substitute for a verified pilot sender.
 
 Deploy the current saved version after changing hosted environment values. Until sender configuration is present, the verification screen explains that delivery is unavailable and keeps access locked. There is no universal test OTP, development bypass or code returned by the API.
 
