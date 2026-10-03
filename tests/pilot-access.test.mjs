@@ -299,3 +299,54 @@ test('provider acceptance followed by a database failure invalidates the code an
   assert.equal((await verify({challengeId:failed.challenge_id,code:emails[0].code})).status,400);
  }finally{console.error=original;}
 });
+
+function syntheticFacility(siteId){
+ database.prepare('INSERT INTO sites(id,org_id,name) VALUES(?,?,?)').run(siteId,PILOT_ORG_ID,'Synthetic site '+siteId);
+ database.prepare('INSERT INTO buildings(id,org_id,site_id,name) VALUES(?,?,?,?)').run('building-'+siteId,PILOT_ORG_ID,siteId,'Synthetic building');
+ database.prepare('INSERT INTO locations(id,org_id,building_id,floor,name) VALUES(?,?,?,?,?)').run('room-'+siteId,PILOT_ORG_ID,'building-'+siteId,'Ground','Synthetic room');
+}
+function syntheticComplaint(id,{site='allowed',reporter='another-student',visibility='private',createdAt=now,assignee=null}={}){
+ database.prepare(`INSERT INTO complaints(id,org_id,site_id,location_id,reporter_id,reporter_name,ticket_no,title,description,item,category,visibility,created_at,updated_at,assignee_id)
+  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,PILOT_ORG_ID,site,'room-'+site,reporter,'Private reporter','CC-'+id,'Synthetic fault '+id,'Private description '+id,'Synthetic fixture','Electrical',visibility,createdAt,createdAt,assignee);
+}
+test('older own and shared complaints remain trackable beyond 500 inaccessible recent reports',async()=>{
+ const email='current@bmsit.in';approve(email);await signIn(email);syntheticFacility('allowed');syntheticFacility('outside');
+ database.prepare('UPDATE members SET site_scope=? WHERE user_id=?').run('allowed',email);
+ syntheticComplaint('old-own',{reporter:email,createdAt:now-1000});
+ syntheticComplaint('old-shared',{visibility:'shared',createdAt:now-1000});
+ syntheticComplaint('old-private',{createdAt:now-1000});
+ syntheticComplaint('outside-own',{site:'outside',reporter:email});
+ syntheticComplaint('outside-shared',{site:'outside',visibility:'shared'});
+ for(let index=0;index<600;index++)syntheticComplaint('hidden-'+index);
+ const response=await get(`op=workspace&org=${PILOT_ORG_ID}`);assert.equal(response.status,200);
+ const workspace=await response.json();assert.deepEqual(workspace.tickets.map(ticket=>ticket.id),['old-shared','old-own']);
+ const own=workspace.tickets.find(ticket=>ticket.own),shared=workspace.tickets.find(ticket=>!ticket.own);
+ assert.equal(own.can_view_evidence,true);assert.equal(own.description,'Private description old-own');
+ assert.equal(shared.can_view_evidence,false);assert.equal(shared.reporter_id,undefined);assert.equal(shared.reporter_name,'Community member');assert.doesNotMatch(shared.description,/Private description/);
+});
+test('staff workspace includes every accessible complaint across multiple batches with equal timestamps',async()=>{
+ await signIn(ADMIN);syntheticFacility('allowed');
+ for(let index=0;index<605;index++)syntheticComplaint(String(index).padStart(4,'0'),{createdAt:index<301?now-1000:now});
+ const expected=Array.from({length:605},(_,index)=>String(604-index).padStart(4,'0'));
+ for(const role of ['admin','verifier']){
+  database.prepare('UPDATE members SET role=? WHERE user_id=?').run(role,ADMIN);
+  const response=await get(`op=workspace&org=${PILOT_ORG_ID}`);assert.equal(response.status,200);
+  const workspace=await response.json();assert.deepEqual(workspace.tickets.map(ticket=>ticket.id),expected);
+  assert.equal(new Set(workspace.tickets.map(ticket=>ticket.id)).size,605);
+  assert.equal(workspace.tickets.every(ticket=>ticket.can_view_evidence),true);
+ }
+});
+test('technician history preserves own and assigned private issues while enforcing site and visibility scope',async()=>{
+ const email='tech@bmsit.ac.in';approve(email);await signIn(email);syntheticFacility('allowed');syntheticFacility('outside');
+ const technician=row('SELECT id FROM members WHERE user_id=?',email);
+ database.prepare('UPDATE members SET role=?,site_scope=? WHERE id=?').run('technician','allowed',technician.id);
+ syntheticComplaint('old-assigned',{assignee:technician.id,createdAt:now-1000});
+ syntheticComplaint('old-own',{reporter:email,createdAt:now-1000});
+ syntheticComplaint('old-shared',{visibility:'shared',createdAt:now-1000});
+ syntheticComplaint('outside-assigned',{site:'outside',assignee:technician.id});
+ for(let index=0;index<600;index++)syntheticComplaint('unassigned-'+index);
+ const response=await get(`op=workspace&org=${PILOT_ORG_ID}`);assert.equal(response.status,200);
+ const workspace=await response.json();assert.deepEqual(workspace.tickets.map(ticket=>ticket.id),['old-shared','old-own','old-assigned']);
+ assert.equal(workspace.tickets.find(ticket=>ticket.id==='old-assigned').can_view_evidence,true);
+ assert.equal(workspace.tickets.find(ticket=>ticket.id==='old-shared').can_view_evidence,false);
+});

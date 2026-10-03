@@ -2,6 +2,7 @@ import {z} from 'zod';
 import {all,one,stmt,db,bucket,uid,identity,membership,initialisePilot,admin,siteAccess,ticketAccess,mutateRequest,safeError,HttpError,insert} from '@/lib/server';
 import {categories,roles,checkPosition,buildingCandidates,withinScope,transition,statusLabel} from '@/lib/domain';
 import {PILOT_ORG_ID,PILOT_ORG_NAME,PILOT_DOMAINS,PILOT_ACCESS_MESSAGE,isPilotEmail,normaliseEmail} from '@/lib/pilot';
+import {visibleComplaints} from '@/lib/complaints';
 export const dynamic='force-dynamic';
 const text=z.string().trim().min(1).max(200),id=text,position=z.object({latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),accuracy:z.number().positive(),timestamp:z.number()});
 const json=(value:any)=>Response.json(value,{headers:{'Cache-Control':'no-store'}});
@@ -23,7 +24,7 @@ export async function GET(request:Request){try{
   const sites=(await all('SELECT * FROM sites WHERE org_id=?',orgId)).filter(s=>withinScope(member,s.id));const siteIds=new Set(sites.map(s=>s.id));
   const buildings=(await all('SELECT * FROM buildings WHERE org_id=?',orgId)).filter(b=>siteIds.has(b.site_id));const buildingIds=new Set(buildings.map(b=>b.id));
   const locations=(await all('SELECT * FROM locations WHERE org_id=?',orgId)).filter(l=>buildingIds.has(l.building_id));
-  const tickets=(await all('SELECT c.*,l.name room,l.floor,b.name building,s.name site,m.name assignee_name FROM complaints c JOIN locations l ON l.id=c.location_id AND l.org_id=c.org_id JOIN buildings b ON b.id=l.building_id AND b.org_id=c.org_id JOIN sites s ON s.id=c.site_id AND s.org_id=c.org_id LEFT JOIN members m ON m.id=c.assignee_id AND m.org_id=c.org_id WHERE c.org_id=? ORDER BY c.created_at DESC LIMIT 500',orgId)).filter(t=>siteIds.has(t.site_id)&&(t.reporter_id===user.userId||['admin','verifier'].includes(member.role)||(member.role==='technician'&&t.assignee_id===member.id)||t.visibility==='shared')).map(t=>redact(t,user,member));
+  const tickets=(await visibleComplaints(orgId,{userId:user.userId,role:member.role,memberId:member.id,siteIds:[...siteIds]})).map(t=>redact(t,user,member));
   const members=member.role==='admin'?await all('SELECT id,name,email,role,site_scope,active,user_id FROM members WHERE org_id=? ORDER BY name',orgId):[];
   const notifications=await all('SELECT * FROM notifications WHERE org_id=? AND user_id=? ORDER BY created_at DESC LIMIT 30',orgId,user.userId);
   const following=(await all('SELECT complaint_id FROM followers WHERE org_id=? AND user_id=?',orgId,user.userId)).map(f=>f.complaint_id);
