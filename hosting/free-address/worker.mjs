@@ -1,5 +1,5 @@
 // This fixed upstream retains CampusCare's existing database and private photos.
-// The browser uses only the new workers.dev origin and its own sign-in cookie.
+// The browser uses its public Cloudflare origin and its own sign-in cookie.
 const UPSTREAM_ORIGIN='https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site';
 
 const error=(status,message)=>Response.json({error:message},{status,headers:{'Cache-Control':'no-store'}});

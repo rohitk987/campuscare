@@ -1,5 +1,7 @@
 # CampusCare's free public address
 
+The current public entry address is **https://campuscare-dln.pages.dev**. See [Pages deployment](pages/README.md) for its upload and runtime settings. The original Worker below remains a fallback.
+
 This small Cloudflare Worker gives visitors a `workers.dev` website address. The existing public Site remains the backend, retaining its database, private photos, sender and eligibility checks. This is a new public entry point, not a migration of stored data to another account.
 
 The address is assigned by the user's Cloudflare account at deployment; do not publish a guessed URL. Use the account's free Workers plan. No D1/R2 resources or mail secrets are needed in this proxy. Users sign in once on the new hostname because session cookies are bound to the host.
