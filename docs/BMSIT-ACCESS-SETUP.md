@@ -1,6 +1,6 @@
 # BMSIT email verification and current-student access
 
-The application now requires three separate checks: a trusted sign-in identity using an exact BMSIT domain, a current approved enrollment record, and a code delivered to that same mailbox. An email prefix or admission year is never treated as proof of enrollment.
+The application requires an exact BMSIT email domain, approved current enrollment or explicitly approved staff access, and a code delivered to that mailbox. Successful OTP verification creates the CampusCare sign-in session; no ChatGPT account or separate platform sign-in is required. An email prefix or admission year is never treated as proof of enrollment.
 
 ## Email delivery setup
 
