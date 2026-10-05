@@ -1,13 +1,13 @@
 import {z} from 'zod';
 import {authenticatedIdentity,membership,admin,all,one,stmt,uid,mutateRequest,safeError,HttpError} from '@/lib/server';
 import {PILOT_ORG_ID,isPilotEmail,normaliseEmail} from '@/lib/pilot';
-import {assertEligibility,hasVerifiedSession,verificationChallenge,mailConfigured,sendVerificationCode,verifyCode,clearVerification} from '@/lib/access';
+import {assertEligibility,loginIdentity,getVerifiedIdentity,mailConfigured,sendVerificationCode,verifyCode,clearVerification} from '@/lib/access';
 export const dynamic='force-dynamic';
 const json=(data:any,headers:Record<string,string>={})=>Response.json(data,{headers:{'Cache-Control':'no-store',...headers}});
 function parse<S extends z.ZodTypeAny>(schema:S,data:unknown):z.output<S>{const result=schema.safeParse(data);if(!result.success)throw new HttpError(400,'Check the required fields and dates.');return result.data;}
 export async function GET(request:Request){try{
  const params=new URL(request.url).searchParams,op=params.get('op')||'status';
- if(op==='status'){const user=await authenticatedIdentity();await assertEligibility(user);return json({userId:user.userId,email:normaliseEmail(user.email),verified:await hasVerifiedSession(user),configured:mailConfigured(),challenge:await verificationChallenge(user)});}
+ if(op==='status'){if(!await getVerifiedIdentity())return json({verified:false,configured:mailConfigured()});const user=await authenticatedIdentity();await assertEligibility(user);return json({userId:user.userId,email:normaliseEmail(user.email),verified:true,configured:mailConfigured()});}
  if(op==='students'){
   const {member}=await membership(PILOT_ORG_ID);admin(member);
   const input=parse(z.object({page:z.coerce.number().int().min(1).max(100000).default(1),search:z.string().trim().max(200).default('')}),{page:params.get('page')??undefined,search:params.get('search')??undefined});
@@ -20,9 +20,8 @@ export async function GET(request:Request){try{
 export async function POST(request:Request){try{
  mutateRequest(request);const body=await request.json().catch(()=>{throw new HttpError(400,'Send a valid JSON request.');});const data=parse(z.object({action:z.string().min(1).max(100)}).passthrough(),body);
  if(data.action==='logout')return json({ok:true},{'Set-Cookie':await clearVerification()});
- const user=await authenticatedIdentity();
- if(data.action==='send_code')return json(await sendVerificationCode(user));
- if(data.action==='verify_code'){const input=parse(z.object({challengeId:z.string().min(1).max(100),code:z.string().regex(/^[0-9]{6}$/)}),data);return json({verified:true},{'Set-Cookie':await verifyCode(user,input.challengeId,input.code)});}
+ if(data.action==='send_code'){const input=parse(z.object({email:z.string().trim().email().max(200)}),data);return json(await sendVerificationCode(await loginIdentity(input.email)));}
+ if(data.action==='verify_code'){const input=parse(z.object({email:z.string().trim().email().max(200),challengeId:z.string().min(1).max(100),code:z.string().regex(/^[0-9]{6}$/)}),data);return json({verified:true},{'Set-Cookie':await verifyCode(await loginIdentity(input.email),input.challengeId,input.code)});}
  const {member}=await membership(PILOT_ORG_ID);admin(member);
  if(data.action==='save_cohort'){
   const input=parse(z.object({id:z.string().optional(),name:z.string().trim().min(1).max(100),admissionYear:z.number().int().min(2000).max(2100),startsAt:z.number().int().nonnegative(),endsAt:z.number().int().positive(),active:z.boolean()}),data);

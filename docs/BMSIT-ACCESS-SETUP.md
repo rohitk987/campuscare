@@ -24,7 +24,7 @@ Deploy the current saved version after changing hosted environment values. Until
 
 ## Approve current students
 
-1. The designated administrator signs in through ChatGPT using the confirmed BMSIT address, then verifies the emailed OTP. Initial setup access is reserved for that address; the first visitor does not become administrator.
+1. The designated administrator enters the confirmed BMSIT address directly on CampusCare and verifies the emailed code. A ChatGPT account is not required. Initial setup access is reserved for that address; the first visitor does not become administrator.
 2. Open **Student access** and add the institution-confirmed batches. Set admission year, access start date, access end date and whether the batch is enabled. Date inputs use Indian Standard Time; access ends after the selected end date.
 3. Add each current student from the official college list with name, exact official email, USN, batch and enrollment status. Emails and USNs are unique within BMSIT. Search checks the full server roster by name, email or USN; use Previous/Next page for the 100-record pages. Unlisted accounts cannot request an OTP for CampusCare access.
 4. Add the setup administrator's own student record if that administrator is a student. Once a student record exists, its eligibility takes precedence over an administrative role. Arrange an approved continuing administrator before that student's access ends.
@@ -35,9 +35,9 @@ Student eligibility is checked on every protected server request, including comp
 
 ## Student workflow
 
-Sign in with the BMSIT account → server checks exact domain and current enrollment → request a six-digit email code → enter the latest code → access the BMSIT workspace. Login and tracking work off campus. New reports still require the existing on-site location and fresh camera checks.
+Enter the BMSIT email → server checks exact domain and current enrollment → receive a six-digit email code → enter the latest code → access the BMSIT workspace. Login and tracking work off campus. New reports still require the existing on-site location and fresh camera checks.
 
-Codes expire after five minutes, are single use, and allow at most five verification attempts. Sending has a one-minute cooldown and a five-code-per-hour limit per authenticated account. The server stores only a keyed hash of the code and a hash of the eight-hour verification session token. The browser token is in a Secure, HttpOnly, SameSite cookie; sign-out revokes it server-side.
+Codes expire after five minutes, are single use, and allow at most five verification attempts. Sending has a one-minute cooldown and a five-code-per-hour limit per canonical college account, including anonymous requests. The server stores only a keyed hash of the code and a hash of the eight-hour login session token. The browser token is in the Secure, HttpOnly, SameSite `__Host-campuscare-session` cookie; sign-out revokes it server-side. Identity comes exclusively from that verified session, and all protected requests recheck eligibility. Previous ChatGPT-backed verification cookies do not authenticate the new login flow; existing members and complaint history remain intact.
 
 ## Verification before admitting real users
 

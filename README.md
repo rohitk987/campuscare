@@ -30,7 +30,7 @@ The native Android client is in [`android/`](android/README.md). It uses Kotlin 
 
 The hosted implementation uses **TypeScript, React, Vinext and a Cloudflare Worker**, with **D1** for relational data and **R2** for photos. This differs from the Django/PostgreSQL stack proposed during design so the complete app can run on the supplied Sites hosting platform. It is a server-backed application; localStorage is not the database.
 
-Authentication is **dispatch-owned ChatGPT sign-in**. It is not a custom college-email/password or institutional SSO implementation. The signed-in account must use exactly `bmsit.in` or `bmsit.ac.in`; subdomains and lookalike suffixes are rejected. All API operations check this trusted identity on the server. Successful ChatGPT sign-in with another domain does not grant CampusCare access.
+Authentication uses **direct BMSIT email and OTP sign-in**. Visitors enter their college email, receive a six-digit code and verify it without a ChatGPT account. Only exact `bmsit.in` or `bmsit.ac.in` domains are accepted. All protected API operations derive identity from a hashed, expiring server session and recheck current eligibility. Platform identity headers and browser-supplied user IDs or roles cannot authenticate a visitor. Existing member IDs retain complaint ownership, staff roles, follows and notifications.
 
 The shared login page can be opened by link; complaints, evidence and administration require a BMSIT identity, email OTP, current eligibility and the appropriate active membership. GPS is requested only for new complaints, never for sign-in or tracking.
 
@@ -38,8 +38,8 @@ The initial administrator's official email is configured through the hosted secr
 
 ## First use
 
-1. Gmail sender authorization, the administrator address and OTP hashing secret are configured for the hosted pilot. A live send and receipt in the BMSIT inbox were confirmed on 2 October 2026; a successful live OTP submission and dashboard session remain to be verified. Follow [BMSIT access setup](docs/BMSIT-ACCESS-SETUP.md).
-2. Sign in through ChatGPT using the designated administrator BMSIT email and verify the OTP. In **Student access**, configure the confirmed current batches and approved student records. Students need an active record, an enabled batch within its dates and a mailbox OTP before enrollment.
+1. Gmail sender authorization, the administrator address and OTP hashing secret are configured for the hosted pilot. A live send and receipt in the BMSIT inbox were confirmed on 2 October 2026; the owner confirmed receipt and verification during the earlier sender setup. Repeat the mailbox test for this updated direct login flow. Follow [BMSIT access setup](docs/BMSIT-ACCESS-SETUP.md).
+2. Enter the designated administrator's BMSIT email directly on the sign-in form and verify the emailed code. In **Student access**, configure the confirmed current batches and approved student records. Students need an active record, an enabled batch within its dates and a mailbox OTP before enrollment.
 3. In **Locations**, add a site using its centre latitude/longitude and radius. Enable reporting when the approved boundary is correct.
 4. Add buildings/zones with their own centre and radius, followed by floors/rooms/areas. `Outdoor` can be used as a level. Individual asset inventories and QR labels are not required.
 5. In **Settings**, configure emergency instructions, location accuracy tolerance and a review target. Test location behaviour on the actual site.
@@ -61,7 +61,7 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 npm run dev
 ```
 
-Apply each migration once, in filename order. The local server normally prints `http://127.0.0.1:5173/`. The starter's default local identity (`seedy@sites.test`) is intentionally rejected by the pilot policy. `tests/pilot-access.test.mjs` exercises real API handlers and SQLite with a test-only trusted identity substitute; no such substitute is shipped. Configure `BMSIT_ADMIN_EMAIL` through the local Worker environment for a supported local BMSIT identity. Never expose the local development server as a public production service.
+Apply each migration once, in filename order. The local server normally prints `http://127.0.0.1:5173/`. Local platform-auth emulation is disabled. `tests/pilot-access.test.mjs` exercises real API handlers, cookie authentication and SQLite with synthetic mail delivery; no identity substitute or universal code is shipped. Configure the sender and administrator through the local Worker environment and use HTTPS to exercise the Secure session cookie. Never expose the local development server as a public production service.
 
 If the Windows npm command shim fails, invoke its JavaScript entrypoint using your installed Node/npm paths, or use `node scripts/run-framework.mjs dev` after dependencies have been installed.
 
@@ -75,7 +75,7 @@ node --test tests/*.test.mjs
 npm run build
 ```
 
-The 14 domain tests cover location and workflow rules. Thirty-seven pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Gmail tests cover verified sender matching, scope checks, revoked authorization, identity-service failure, rejected delivery and configuration/header validation. Roster search runs on the server and returns pages of 100 records, so administrators can find and suspend records beyond the original 2,000-row limit. Four client tests check cross-tab account switching and delayed responses without allowing old privileged data to return. Four OAuth setup tests check Desktop client parsing, state/PKCE, callback validation and token/identity checks. Two additional tests execute the production mail adapter inside workerd and reject redirects without forwarding credentials. Three history regressions cover older complaints behind 600 inaccessible reports, 605 accessible reports with equal timestamps, and technician/site privacy. The 61 automated tests use synthetic provider responses. The separate live inbox check confirmed sending and receipt on 2 October 2026; it did not confirm code submission or an authenticated dashboard session. See [Gmail sender setup](docs/GMAIL-SENDER-SETUP.md). Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
+The 14 domain tests cover location and workflow rules. Forty-two pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Gmail tests cover verified sender matching, scope checks, revoked authorization, identity-service failure, rejected delivery and configuration/header validation. Roster search runs on the server and returns pages of 100 records, so administrators can find and suspend records beyond the original 2,000-row limit. Four client tests check cross-tab account switching and delayed responses without allowing old privileged data to return. Four OAuth setup tests check Desktop client parsing, state/PKCE, callback validation and token/identity checks. Two additional tests execute the production mail adapter inside workerd and reject redirects without forwarding credentials. Three history regressions cover older complaints behind 600 inaccessible reports, 605 accessible reports with equal timestamps, and technician/site privacy. The 66 automated tests use synthetic provider responses. The owner confirmed receipt and verification during the earlier sender setup. The updated direct login must also be checked in a real browser with the emailed code. See [Gmail sender setup](docs/GMAIL-SENDER-SETUP.md). Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
 
 ## Application structure
 
@@ -85,7 +85,7 @@ app/report-dialog.tsx           reporting wizard and camera/location capture
 app/ticket-sheet.tsx             evidence review, actions and history
 app/admin-dialog.tsx             site, building, room and member configuration
 app/api/campuscare/route.ts        authenticated API, access checks and persistence
-app/chatgpt-auth.ts              platform authentication integration
+lib/account.ts                  verified mailbox identity type
 lib/domain.ts                   pure location and workflow rules
 lib/server.ts                   prepared D1 statements and authorisation helpers
 lib/pilot.ts                    fixed BMSIT organisation and exact email-domain policy

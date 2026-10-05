@@ -98,17 +98,17 @@ class NativeAccessTest {
         assertLocked()
     }
 
-    @Test fun logoutUsesTheWebViewCookieAndCallsBothEndpointsEvenOnRevocationFailure() = runBlocking {
+    @Test fun logoutUsesTheWebViewCookieAndCallsOnlyCampusCare() = runBlocking {
         setCookie("native_access_fixture=verified; Path=/")
         state.connect()
         assertTrue(server.lastCookie.contains("native_access_fixture=verified"))
         state.clearAccess()
         state.api.signOut()
-        assertEquals(listOf("otp", "platform"), server.logouts.toList())
+        assertEquals(listOf("otp"), server.logouts.toList())
         assertFalse(CookieManager.getInstance().getCookie(server.url).orEmpty().contains("native_access_fixture=verified"))
         server.logoutFailure = true
         assertTrue(runCatching { state.api.signOut() }.exceptionOrNull() is ApiException)
-        assertEquals(listOf("otp", "platform", "otp", "platform"), server.logouts.toList())
+        assertEquals(listOf("otp", "otp"), server.logouts.toList())
     }
 
     @Test fun anOldExternalRedirectCannotClearANewerVerifiedSession() = runBlocking {
@@ -215,8 +215,6 @@ private class AccessFixture : AutoCloseable {
             logouts.add("otp")
             outgoing["Set-Cookie"] = "native_access_fixture=; Max-Age=0; Path=/"
             if (logoutFailure) { status = 503; body = "{\"error\":\"Synthetic delivery failure\"}" }
-        } else if (uri.path == "/signout-with-chatgpt") {
-            logouts.add("platform"); status = 302; outgoing["Location"] = "/"
         } else if (denial != 0) {
             status = denial
             body = JSONObject().put("error", "Synthetic access refusal").put("code", denialCode).toString()

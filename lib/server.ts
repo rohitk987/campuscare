@@ -1,8 +1,8 @@
 import {env} from 'cloudflare:workers';
-import {getChatGPTUser,type ChatGPTUser} from '@/app/chatgpt-auth';
+import type {CampusUser} from './account';
 import {withinScope} from './domain';
 import {PILOT_ORG_ID,PILOT_ORG_NAME,PILOT_ACCESS_MESSAGE,isPilotEmail,normaliseEmail} from './pilot';
-import {requireVerifiedAccess} from './access';
+import {requireVerifiedAccess,getVerifiedIdentity} from './access';
 export const uid=()=>crypto.randomUUID();
 export class HttpError extends Error{constructor(public status:number,message:string,public code?:'ACCESS_DENIED'|'EMAIL_VERIFICATION_REQUIRED'){super(message)}}
 export const db=()=>{if(!env.DB)throw new HttpError(503,'Saved data is temporarily unavailable. Please retry.');return env.DB;};
@@ -11,8 +11,8 @@ export const stmt=(sql:string,...params:any[])=>db().prepare(sql).bind(...params
 export function insert(table:string,values:Record<string,any>){const keys=Object.keys(values);return stmt(`INSERT INTO ${table} (${keys.map(k=>'"'+k+'"').join(',')}) VALUES (${keys.map(()=>'?').join(',')})`,...keys.map(k=>values[k]));}
 export async function all(sql:string,...params:any[]){return (await stmt(sql,...params).all()).results as any[];}
 export async function one(sql:string,...params:any[]){return await stmt(sql,...params).first() as any;}
-export async function authenticatedIdentity():Promise<ChatGPTUser>{const u=await getChatGPTUser();if(!u)throw new HttpError(401,'Sign in to access CampusCare.');if(!isPilotEmail(u.email))throw new HttpError(403,PILOT_ACCESS_MESSAGE,'ACCESS_DENIED');if(await one('SELECT id FROM members WHERE org_id=? AND active=0 AND (user_id=? OR email=?)',PILOT_ORG_ID,u.userId,normaliseEmail(u.email)))throw new HttpError(403,'Your BMSIT account has been deactivated. Contact the administrator.','ACCESS_DENIED');if(await one('SELECT id FROM members WHERE org_id=? AND email=? AND user_id IS NOT NULL AND user_id<>?',PILOT_ORG_ID,normaliseEmail(u.email),u.userId))throw new HttpError(403,'This BMSIT email is already linked to another account. Contact the administrator.','ACCESS_DENIED');return u;}
-export async function identity():Promise<ChatGPTUser>{const user=await authenticatedIdentity();await requireVerifiedAccess(user);return user;}
+export async function authenticatedIdentity():Promise<CampusUser>{const u=await getVerifiedIdentity();if(!u)throw new HttpError(401,'Sign in with your BMSIT email and verification code to access CampusCare.');if(!isPilotEmail(u.email))throw new HttpError(403,PILOT_ACCESS_MESSAGE,'ACCESS_DENIED');if(await one('SELECT id FROM members WHERE org_id=? AND active=0 AND (user_id=? OR email=?)',PILOT_ORG_ID,u.userId,normaliseEmail(u.email)))throw new HttpError(403,'Your BMSIT account has been deactivated. Contact the administrator.','ACCESS_DENIED');if(await one('SELECT id FROM members WHERE org_id=? AND email=? AND user_id IS NOT NULL AND user_id<>?',PILOT_ORG_ID,normaliseEmail(u.email),u.userId))throw new HttpError(403,'This BMSIT email is already linked to another account. Contact the administrator.','ACCESS_DENIED');return u;}
+export async function identity():Promise<CampusUser>{const user=await authenticatedIdentity();await requireVerifiedAccess(user);return user;}
 export async function membership(orgId:string){const user=await identity();if(orgId!==PILOT_ORG_ID)throw new HttpError(403,'Only the BMSIT workspace is available during this pilot.','ACCESS_DENIED');const member=await one('SELECT * FROM members WHERE org_id=? AND user_id=? AND email=? AND active=1',orgId,user.userId,normaliseEmail(user.email));if(!member)throw new HttpError(403,'Your BMSIT membership is unavailable or has been deactivated. Contact the BMSIT administrator.','ACCESS_DENIED');return {user,member};}
 export async function initialisePilot(user:Awaited<ReturnType<typeof identity>>){
  if(!isPilotEmail(user.email))throw new HttpError(403,PILOT_ACCESS_MESSAGE);

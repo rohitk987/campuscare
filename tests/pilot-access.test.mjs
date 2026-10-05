@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {build} from 'esbuild';
 import {isPilotEmail, PILOT_ORG_ID} from '../lib/pilot.ts';
 
-// Run the production API handlers and migrations with a trusted identity substitute,
+// Run the production API handlers and migrations with real cookie authentication,
 // transactional SQLite D1 adapter, and synthetic email delivery. Nothing is sent.
 let database, visitor=null, cookie='', emails=[], deliveryStatus=200,failSentUpdate=false;
 const SEND_SCOPE='https://www.googleapis.com/auth/gmail.send';
@@ -13,7 +13,7 @@ let gmailTokenStatus=200,gmailScope='openid email '+SEND_SCOPE,gmailSender='',gm
 const actualNow=Date.now, actualFetch=globalThis.fetch;
 let now=actualNow();
 const ADMIN='24ug1bybs030@bmsit.in';
-const state={env:{},getUser:async()=>visitor,getHeaders:async()=>new Headers({cookie})};
+const state={env:{},getHeaders:async()=>new Headers({cookie,...(visitor?{'oai-authenticated-user-id':visitor.userId,'oai-authenticated-user-email':visitor.email}:{} )})};
 function prepared(sql,values=[]){
  const execute=()=>{if(failSentUpdate&&sql.startsWith("UPDATE otp_challenges SET delivery='sent'")){failSentUpdate=false;throw new Error('synthetic database failure');}return {meta:{changes:Number(database.prepare(sql).run(...values).changes)}};};
  return {bind:(...next)=>prepared(sql,next),first:async()=>database.prepare(sql).get(...values)??null,all:async()=>({results:database.prepare(sql).all(...values)}),run:async()=>execute(),execute};
@@ -53,8 +53,8 @@ Date.now=()=>now;
 async function bundleRoute(entry){
  const bundle=await build({entryPoints:[entry],bundle:true,write:false,platform:'node',format:'esm',plugins:[{
   name:'test-platform-boundaries',setup(plugin){
-   plugin.onResolve({filter:/^(cloudflare:workers|@\/app\/chatgpt-auth|next\/headers)$/},args=>({path:args.path,namespace:'test-platform'}));
-   plugin.onLoad({filter:/.*/,namespace:'test-platform'},args=>({contents:args.path==='cloudflare:workers'?'export const env=globalThis.__campuscarePilotTest.env;':args.path==='next/headers'?'export const headers=globalThis.__campuscarePilotTest.getHeaders;':'export const getChatGPTUser=globalThis.__campuscarePilotTest.getUser;'}));
+   plugin.onResolve({filter:/^(cloudflare:workers|next\/headers)$/},args=>({path:args.path,namespace:'test-platform'}));
+   plugin.onLoad({filter:/.*/,namespace:'test-platform'},args=>({contents:args.path==='cloudflare:workers'?'export const env=globalThis.__campuscarePilotTest.env;':'export const headers=globalThis.__campuscarePilotTest.getHeaders;'}));
   },
  }]});
  return import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'));
@@ -67,7 +67,7 @@ const get=query=>campus.GET(new Request('https://campus.test/api/campuscare?'+qu
 const accessGet=(op='status')=>access.GET(new Request('https://campus.test/api/access?op='+op));
 const request=(action,values={})=>new Request('https://campus.test/api/access',{method:'POST',headers:{'Content-Type':'application/json','X-Campuscare-Request':'1','Origin':'https://campus.test'},body:JSON.stringify({action,...values})});
 const post=(action,values={})=>campus.POST(request(action,values));
-const accessPost=(action,values={})=>access.POST(request(action,values));
+const accessPost=(action,values={})=>access.POST(request(action,['send_code','verify_code'].includes(action)?{email:visitor?.email,...values}:values));
 async function photo(org){const data=new FormData();data.set('orgId',org);return campus.POST(new Request('https://campus.test/api/campuscare?op=photo',{method:'POST',headers:{'X-Campuscare-Request':'1'},body:data}));}
 const row=(sql,...values)=>database.prepare(sql).get(...values);
 function approve(email,changes={}){
@@ -76,6 +76,8 @@ function approve(email,changes={}){
 async function send(){const response=await accessPost('send_code');assert.equal(response.status,200);const challenge=await response.json();assert.equal('code' in challenge,false);return {...challenge,code:emails.at(-1).code};}
 async function verify(challenge){return accessPost('verify_code',{challengeId:challenge.challengeId,code:challenge.code});}
 async function signIn(email,id=email){
+ // Model an existing pilot member to prove historical IDs and ownership survive.
+ database.prepare('INSERT INTO members(id,org_id,user_id,email,name,role) VALUES(?,?,?,?,?,?) ON CONFLICT(org_id,email) DO UPDATE SET user_id=COALESCE(members.user_id,excluded.user_id)').run('existing-'+email,PILOT_ORG_ID,id,email,'Test member',email===ADMIN?'admin':'reporter');
  visitor=user(email,id);cookie='';const challenge=await send();const response=await verify(challenge);assert.equal(response.status,200);cookie=response.headers.get('set-cookie').split(';')[0];assert.equal((await post('initialise',{role:'admin'})).status,200);return cookie;
 }
 beforeEach(()=>{
@@ -89,35 +91,88 @@ beforeEach(()=>{
 });
 after(()=>{database.close();Date.now=actualNow;globalThis.fetch=actualFetch;delete globalThis.__campuscarePilotTest;});
 
+test('forged platform identity, user IDs and roles cannot replace a mailbox login',async()=>{
+ visitor=user(ADMIN,'forged-platform-admin');
+ assert.equal((await get('op=bootstrap')).status,401);
+ assert.equal((await post('initialise',{userId:'forged-platform-admin',role:'admin'})).status,401);
+ approve('new@bmsit.in');visitor=user('new@bmsit.in','forged-platform-admin');
+ const challenge=await send();const verified=await verify(challenge);assert.equal(verified.status,200);
+ cookie=verified.headers.get('set-cookie').split(';')[0];visitor=user(ADMIN,'forged-platform-admin');
+ assert.equal((await post('initialise',{role:'admin',userId:'forged-platform-admin'})).status,200);
+ const boot=await (await get('op=bootstrap')).json();assert.equal(boot.user.email,'new@bmsit.in');assert.equal(boot.organisations[0].role,'reporter');
+ assert.equal(row('SELECT user_id FROM otp_sessions').user_id.startsWith('campuscare:'),true);
+ assert.notEqual(row('SELECT user_id FROM otp_sessions').user_id,'forged-platform-admin');
+});
+
+test('first mailbox login works with no platform identity and retains a stable ID across concurrent enrollment',async()=>{
+ approve('new@bmsit.in');visitor=null;
+ const response=await accessPost('send_code',{email:'NEW@BMSIT.IN',userId:'attacker',role:'admin'});assert.equal(response.status,200);
+ const challenge=await response.json();assert.equal(challenge.email,'new@bmsit.in');
+ const verified=await accessPost('verify_code',{email:challenge.email,challengeId:challenge.challengeId,code:emails[0].code,userId:'attacker',role:'admin'});assert.equal(verified.status,200);
+ cookie=verified.headers.get('set-cookie').split(';')[0];
+ for(const result of await Promise.all(Array.from({length:6},()=>post('initialise',{role:'admin'}))))assert.equal(result.status,200);
+ const member=row('SELECT * FROM members WHERE email=?','new@bmsit.in');assert.match(member.user_id,/^campuscare:[a-f0-9]{64}$/);assert.equal(member.role,'reporter');
+ assert.equal(row('SELECT COUNT(*) n FROM members WHERE email=?','new@bmsit.in').n,1);
+ assert.equal((await (await get('op=bootstrap')).json()).user.id,member.user_id);
+ now+=60_001;const again=await accessPost('send_code',{email:challenge.email});assert.equal(again.status,200);assert.equal(row('SELECT user_id FROM otp_challenges').user_id,member.user_id);
+});
+
+test('an OTP cannot authenticate a different approved email and roster revocation blocks pending verification',async()=>{
+ approve('first@bmsit.in');approve('second@bmsit.in');visitor=user('first@bmsit.in');const challenge=await send();
+ assert.equal((await accessPost('verify_code',{...challenge,email:'second@bmsit.in'})).status,400);
+ assert.equal(row('SELECT COUNT(*) n FROM otp_sessions').n,0);
+ database.prepare("UPDATE student_records SET status='suspended' WHERE email='first@bmsit.in'").run();assert.equal((await verify(challenge)).status,403);
+ assert.equal(row('SELECT COUNT(*) n FROM otp_sessions').n,0);
+});
+
+test('existing complaint ownership, follows and notifications survive direct email login',async()=>{
+ const email='existing@bmsit.in',oldId='historical-platform-id';approve(email);await signIn(email,oldId);syntheticFacility('allowed');
+ syntheticComplaint('historical-own',{reporter:oldId});
+ database.prepare('INSERT INTO followers(id,org_id,complaint_id,user_id) VALUES(?,?,?,?)').run('old-follow',PILOT_ORG_ID,'historical-own',oldId);
+ database.prepare('INSERT INTO notifications(id,org_id,user_id,complaint_id,message,created_at) VALUES(?,?,?,?,?,?)').run('old-update',PILOT_ORG_ID,oldId,'historical-own','Existing update',now);
+ visitor=null;const response=await get(`op=workspace&org=${PILOT_ORG_ID}`);assert.equal(response.status,200);
+ const workspace=await response.json();assert.equal(workspace.tickets[0].own,true);assert.equal(workspace.tickets[0].can_view_evidence,true);
+ assert.deepEqual(workspace.following,['historical-own']);assert.equal(workspace.notifications[0].id,'old-update');assert.equal(workspace.accessIdentity.id,oldId);
+});
+
+test('legacy verification cookies and sessions cannot serve as the new primary login credential',async()=>{
+ approve('student@bmsit.in');await signIn('student@bmsit.in');const current=cookie;
+ cookie=current.replace('__Host-campuscare-session','__Host-campuscare-verified');assert.equal((await get('op=bootstrap')).status,401);
+ cookie=current;database.prepare("UPDATE otp_sessions SET challenge_id='legacy-second-factor-challenge'").run();assert.equal((await get('op=bootstrap')).status,401);
+ assert.equal((await (await accessGet()).json()).verified,false);
+});
+
 test('only exact official domains match, including case normalization',()=>{
  for(const email of ['student@bmsit.in','student@bmsit.ac.in','STUDENT@BMSIT.IN'])assert.equal(isPilotEmail(email),true);
  for(const email of ['student@gmail.com','student@bmsit.in.evil.com','student@sub.bmsit.in','bmsit.in@evil.com','a@@bmsit.in','@bmsit.in','x y@bmsit.in','x@bmsit.in.','x@bmsit．in'])assert.equal(isPilotEmail(email),false,email);
 });
-test('anonymous and outside-domain accounts cannot access either API or send email',async()=>{
- assert.equal((await get('op=bootstrap')).status,401);assert.equal((await accessGet()).status,401);
+test('anonymous and forged outside-domain headers cannot access protected APIs',async()=>{
+ assert.equal((await get('op=bootstrap')).status,401);assert.equal((await accessGet()).status,200);assert.equal((await (await accessGet()).json()).verified,false);
  for(const email of ['student@gmail.com','student@bmsit.in.evil.com']){
   visitor=user(email);
-  for(const response of [await get('op=bootstrap'),await get(`op=workspace&org=${PILOT_ORG_ID}`),await get(`op=photo&org=${PILOT_ORG_ID}&id=x`),await post('initialise'),await post('create_org'),await photo(PILOT_ORG_ID),await accessGet(),await accessPost('send_code')])assert.equal(response.status,403);
+  for(const response of [await get('op=bootstrap'),await get(`op=workspace&org=${PILOT_ORG_ID}`),await get(`op=photo&org=${PILOT_ORG_ID}&id=x`),await post('initialise'),await post('create_org'),await photo(PILOT_ORG_ID)])assert.equal(response.status,401);
+  assert.equal((await accessPost('send_code')).status,403);
  }
  assert.equal(emails.length,0);assert.equal(row('SELECT COUNT(*) n FROM members').n,0);
 });
 test('official email alone and self-declared enrollment never grant student access',async()=>{
  visitor=user('unlisted@bmsit.in');
- for(const response of [await accessGet(),await accessPost('send_code',{status:'active',cohortId:'current-batch'}),await post('initialise',{role:'admin',active:true}),await accessPost('save_student',{email:visitor.email,name:'Self',usn:'SELF',cohortId:'current-batch',status:'active'})])assert.equal(response.status,403);
+ assert.equal((await accessPost('send_code',{status:'active',cohortId:'current-batch'})).status,403);
+ for(const response of [await post('initialise',{role:'admin',active:true}),await accessPost('save_student',{email:visitor.email,name:'Self',usn:'SELF',cohortId:'current-batch',status:'active'})])assert.equal(response.status,401);
  assert.equal(emails.length,0);assert.equal(row('SELECT COUNT(*) n FROM student_records').n,0);
 });
 test('roster status, disabled batches, future start and inclusive expiry all deny access',async()=>{
  visitor=user('student@bmsit.in');approve(visitor.email);
  for(const status of ['graduated','withdrawn','suspended']){database.prepare('UPDATE student_records SET status=?').run(status);assert.equal((await accessPost('send_code')).status,403);}
  database.prepare("UPDATE student_records SET status='active'").run();
- database.prepare('UPDATE cohorts SET active=0').run();assert.equal((await accessGet()).status,403);
- database.prepare('UPDATE cohorts SET active=1,starts_at=?').run(now+1);assert.equal((await accessGet()).status,403);
- database.prepare('UPDATE cohorts SET starts_at=?,ends_at=?').run(now-1,now);assert.equal((await accessGet()).status,403);assert.equal(emails.length,0);
+ database.prepare('UPDATE cohorts SET active=0').run();assert.equal((await accessPost('send_code')).status,403);
+ database.prepare('UPDATE cohorts SET active=1,starts_at=?').run(now+1);assert.equal((await accessPost('send_code')).status,403);
+ database.prepare('UPDATE cohorts SET starts_at=?,ends_at=?').run(now-1,now);assert.equal((await accessPost('send_code')).status,403);assert.equal(emails.length,0);
 });
 test('eligible students still need OTP before bootstrap, reads and photo uploads',async()=>{
  visitor=user('student@bmsit.in');approve(visitor.email);
  assert.equal((await (await accessGet()).json()).verified,false);
- for(const response of [await get('op=bootstrap'),await post('initialise'),await get(`op=workspace&org=${PILOT_ORG_ID}`),await get(`op=photo&org=${PILOT_ORG_ID}&id=x`),await photo(PILOT_ORG_ID)])assert.equal(response.status,428);
+ for(const response of [await get('op=bootstrap'),await post('initialise'),await get(`op=workspace&org=${PILOT_ORG_ID}`),await get(`op=photo&org=${PILOT_ORG_ID}&id=x`),await photo(PILOT_ORG_ID)])assert.equal(response.status,401);
  assert.equal(row('SELECT COUNT(*) n FROM members').n,0);
 });
 test('both domains enroll only verified approved students as reporters, idempotently',async()=>{
@@ -129,11 +184,11 @@ test('both domains enroll only verified approved students as reporters, idempote
  }
  assert.equal(row("SELECT COUNT(*) n FROM members WHERE role='reporter'").n,2);
 });
-test('email is taken from trusted identity; codes and tokens are not stored in plaintext',async()=>{
+test('codes and tokens are hashed and anonymous status does not expose the login challenge',async()=>{
  visitor=user('student@bmsit.in');approve(visitor.email);const challenge=await send();assert.equal(emails[0].email,visitor.email);
  const record=row('SELECT * FROM otp_challenges');assert.match(record.code_hash,/^[a-f0-9]{64}$/);assert.notEqual(record.code_hash,challenge.code);
- const status=await (await accessGet()).json();assert.equal(status.challenge.challengeId,challenge.challengeId);assert.equal('code' in status.challenge,false);
- const response=await verify(challenge);assert.equal(response.status,200);const header=response.headers.get('set-cookie');for(const flag of ['__Host-campuscare-verified=','HttpOnly','Secure','SameSite=Lax','Path=/'])assert.ok(header.includes(flag));
+ const status=await (await accessGet()).json();assert.equal(status.challenge,undefined);assert.equal(status.email,undefined);assert.equal('code' in status,false);
+ const response=await verify(challenge);assert.equal(response.status,200);const header=response.headers.get('set-cookie');for(const flag of ['__Host-campuscare-session=','HttpOnly','Secure','SameSite=Lax','Path=/'])assert.ok(header.includes(flag));
  cookie=header.split(';')[0];assert.notEqual(row('SELECT token_hash FROM otp_sessions').token_hash,cookie.split('=')[1]);assert.equal((await (await accessGet()).json()).verified,true);
 });
 test('OTP attempts stop at five, including concurrent incorrect guesses',async()=>{
@@ -170,10 +225,11 @@ test('email service failure leaves an unusable challenge and no verification ses
  const record=row('SELECT * FROM otp_challenges');assert.equal(record.delivery,'failed');assert.equal(record.code_hash,'');assert.equal((await verify({challengeId:record.challenge_id,code:emails[0].code})).status,400);assert.equal(row('SELECT COUNT(*) n FROM otp_sessions').n,0);
 });
 test('verified sessions are bound to email and identity, expire and are revoked on logout',async()=>{
- approve('student@bmsit.in');const saved=await signIn('student@bmsit.in','original');visitor=user('student@bmsit.in','different');assert.equal((await get('op=bootstrap')).status,403);
- approve('another@bmsit.in');visitor=user('another@bmsit.in','original');assert.equal((await get('op=bootstrap')).status,428);
- visitor=user('student@bmsit.in','original');now+=8*3600000;assert.equal((await get('op=bootstrap')).status,428);now-=8*3600000;cookie=saved;
- const logout=await accessPost('logout');assert.equal(logout.status,200);assert.ok(logout.headers.get('set-cookie').includes('Max-Age=0'));assert.equal(row('SELECT COUNT(*) n FROM otp_sessions').n,0);assert.equal((await get('op=bootstrap')).status,428);
+ approve('student@bmsit.in');const saved=await signIn('student@bmsit.in','original');visitor=user(ADMIN,'forged-admin');
+ const boot=await (await get('op=bootstrap')).json();assert.equal(boot.user.id,'original');assert.equal(boot.user.email,'student@bmsit.in');assert.equal(boot.organisations[0].role,'reporter');
+ visitor=null;assert.equal((await get('op=bootstrap')).status,200);
+ now+=8*3600000;assert.equal((await get('op=bootstrap')).status,401);now-=8*3600000;cookie=saved;
+ const logout=await accessPost('logout');assert.equal(logout.status,200);assert.ok(logout.headers.get('set-cookie').includes('Max-Age=0'));assert.equal(row('SELECT COUNT(*) n FROM otp_sessions').n,0);assert.equal((await get('op=bootstrap')).status,401);
 });
 test('graduation, suspension and batch expiry revoke an already verified session on every protected operation',async()=>{
  approve('student@bmsit.in');await signIn('student@bmsit.in');
@@ -186,13 +242,13 @@ test('deactivation cannot be bypassed by re-enrollment or by changing account em
  assert.equal(row('SELECT active FROM members WHERE user_id=?','original').active,0);
 });
 test('only designated administrator can claim setup access, and must first verify OTP',async()=>{
- visitor=user(ADMIN);assert.equal((await accessPost('save_cohort',{name:'Self-approved'})).status,428);assert.equal((await post('initialise')).status,428);await signIn(ADMIN,'admin-id');assert.equal(row('SELECT role FROM members WHERE user_id=?','admin-id').role,'admin');
+ visitor=user(ADMIN);assert.equal((await accessPost('save_cohort',{name:'Self-approved'})).status,401);assert.equal((await post('initialise')).status,401);await signIn(ADMIN,'admin-id');assert.equal(row('SELECT role FROM members WHERE user_id=?','admin-id').role,'admin');
  assert.equal((await post('invite_member',{orgId:PILOT_ORG_ID,name:'Outside',email:'outside@gmail.com',role:'admin',site_scope:'*'})).status,400);
  assert.equal((await post('save_settings',{orgId:PILOT_ORG_ID,name:'Other college',color:'#305bea',max_accuracy:50,response_hours:24,emergency_contact:'Call facilities',identifier_label:'USN'})).status,400);
 });
 test('approved staff need OTP and an inactive student record overrides their staff role',async()=>{
  await signIn(ADMIN);assert.equal((await post('invite_member',{orgId:PILOT_ORG_ID,name:'Test technician',email:'tech@bmsit.ac.in',role:'technician',site_scope:'*'})).status,200);
- visitor=user('tech@bmsit.ac.in');cookie='';assert.equal((await get('op=bootstrap')).status,428);await signIn(visitor.email);assert.equal((await get(`op=workspace&org=${PILOT_ORG_ID}`)).status,200);
+ visitor=user('tech@bmsit.ac.in');cookie='';assert.equal((await get('op=bootstrap')).status,401);await signIn(visitor.email);assert.equal((await get(`op=workspace&org=${PILOT_ORG_ID}`)).status,200);
  approve(visitor.email,{status:'graduated'});assert.equal((await accessGet()).status,403);assert.equal((await get('op=bootstrap')).status,403);
 });
 test('only administrators can maintain the roster; invalid parent and duplicate USNs are rejected',async()=>{
@@ -240,13 +296,14 @@ test('student pagination rejects invalid inputs and clamps pages after records c
 test('global eligibility rejection is distinct from an ordinary workflow permission error',async()=>{
  approve('student@bmsit.in');await signIn('student@bmsit.in');const forbidden=await post('save_site',{orgId:PILOT_ORG_ID});assert.equal(forbidden.status,403);assert.equal((await forbidden.json()).code,undefined);
  database.prepare("UPDATE student_records SET status='graduated'").run();const denied=await get('op=bootstrap');assert.equal(denied.status,403);assert.equal((await denied.json()).code,'ACCESS_DENIED');
- database.prepare("UPDATE student_records SET status='active'").run();cookie='';const expired=await get('op=bootstrap');assert.equal(expired.status,428);assert.equal((await expired.json()).code,'EMAIL_VERIFICATION_REQUIRED');
+ database.prepare("UPDATE student_records SET status='active'").run();cookie='';const expired=await get('op=bootstrap');assert.equal(expired.status,401);
 });
 
 function configureGmail(){Object.assign(state.env,{OTP_MAIL_PROVIDER:'gmail',GMAIL_CLIENT_ID:'synthetic-client.apps.googleusercontent.com',GMAIL_CLIENT_SECRET:'synthetic-client-secret',GMAIL_REFRESH_TOKEN:'synthetic-refresh-token',GMAIL_SENDER_EMAIL:ADMIN});}
-test('Gmail authorization sends only to the trusted eligible identity and completes OTP verification',async()=>{
+test('Gmail sends to the eligible email entered on the public login form and completes verification',async()=>{
  configureGmail();visitor=user('student@bmsit.ac.in');approve(visitor.email);
- const response=await accessPost('send_code',{email:'attacker@gmail.com'});assert.equal(response.status,200);
+ assert.equal((await accessPost('send_code',{email:'attacker@gmail.com'})).status,403);
+ const response=await accessPost('send_code',{email:visitor.email,userId:'attacker',role:'admin'});assert.equal(response.status,200);
  const challenge=await response.json();assert.equal('code' in challenge,false);assert.equal(emails[0].email,visitor.email);
  assert.deepEqual(providerCalls,['https://oauth2.googleapis.com/token','https://openidconnect.googleapis.com/v1/userinfo','https://gmail.googleapis.com/gmail/v1/users/me/messages/send']);
  challenge.code=emails[0].code;assert.equal((await verify(challenge)).status,200);

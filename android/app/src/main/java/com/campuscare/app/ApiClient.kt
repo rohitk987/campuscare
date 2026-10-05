@@ -33,17 +33,10 @@ class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {
     suspend fun initialise(demo: Boolean = false): JSONObject =
         request("initialise", JSONObject().put("demo", demo))
 
-    /** Call the server logout endpoint without following its redirect. UI clears local state in finally. */
+    /** Revoke the CampusCare mailbox session. UI clears local state in finally. */
     suspend fun signOut() {
-        try {
-            parseJson(exchange("POST", URL("$baseUrl/api/access"),
-                "{\"action\":\"logout\"}".toByteArray(Charsets.UTF_8), "application/json; charset=utf-8"))
-        } finally {
-            val response = exchange("GET", URL("$baseUrl/signout-with-chatgpt?return_to=%2F"),
-                followRedirects = false)
-            // A redirect is the normal platform logout response.
-            if (response.status !in 200..399 && response.status != 401) checkResponse(response)
-        }
+        parseJson(exchange("POST", URL("$baseUrl/api/access"),
+            "{\"action\":\"logout\"}".toByteArray(Charsets.UTF_8), "application/json; charset=utf-8"))
     }
 
     suspend fun workspace(orgId: String): JSONObject =

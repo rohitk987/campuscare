@@ -2,6 +2,10 @@
 
 Recorded on 1 October 2026 for version `0.1.0-preview` (`com.campuscare.app`).
 
+## Direct email login update
+
+On 6 October 2026, the source was updated to use CampusCare email OTP login and only the CampusCare logout endpoint. The older test results and APKs below predate that change. The WebView already opens the portal root and shares its session cookies.
+
 ## Current BMSIT access build
 
 The current source and local `CampusCare-BMSIT-pilot.apk` add BMSIT OTP/enrollment handling. The GitHub `android-preview-0.1` release below is historical and has not been replaced.

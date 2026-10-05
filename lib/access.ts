@@ -1,26 +1,49 @@
 import {env} from 'cloudflare:workers';
 import {headers} from 'next/headers';
-import type {ChatGPTUser} from '@/app/chatgpt-auth';
+import type {CampusUser} from './account';
 import {db,stmt,one,HttpError,uid} from './server';
 import {PILOT_ORG_ID,isPilotEmail,normaliseEmail} from './pilot';
 import {deliverVerificationCode,mailFailureDetails} from './mail';
 import {mailConfigured} from './mail';
 export {mailConfigured} from './mail';
 
-export const VERIFICATION_COOKIE='__Host-campuscare-verified';
+export const VERIFICATION_COOKIE='__Host-campuscare-session';
+const LOGIN_CHALLENGE_PREFIX='login-';
 const CODE_TTL=5*60_000, SESSION_TTL=8*60*60_000;
 const encoder=new TextEncoder();
 const hex=(bytes:ArrayBuffer)=>Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
 async function digest(value:string){return hex(await crypto.subtle.digest('SHA-256',encoder.encode(value)));}
-async function codeHash(id:string,user:ChatGPTUser,code:string){
+async function codeHash(id:string,user:CampusUser,code:string){
  if(!env.OTP_HMAC_SECRET||env.OTP_HMAC_SECRET.length<32)throw new HttpError(503,'Email verification is not configured yet. Contact the CampusCare administrator.');
  const key=await crypto.subtle.importKey('raw',encoder.encode(env.OTP_HMAC_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);
- return hex(await crypto.subtle.sign('HMAC',key,encoder.encode(JSON.stringify([id,user.userId,normaliseEmail(user.email),code]))));
+ return hex(await crypto.subtle.sign('HMAC',key,encoder.encode(JSON.stringify(['campuscare-email-login-v1',id,user.userId,normaliseEmail(user.email),code]))));
 }
 function cookieValue(value:string){return value.split(';').map(part=>part.trim()).find(part=>part.startsWith(VERIFICATION_COOKIE+'='))?.slice(VERIFICATION_COOKIE.length+1)||'';}
 async function currentToken(){return cookieValue((await headers()).get('cookie')||'');}
-export async function assertEligibility(user:ChatGPTUser){
+export async function loginIdentity(value:string):Promise<CampusUser>{
+ const email=normaliseEmail(value);
+ if(!isPilotEmail(email))throw new HttpError(403,'Use your official @bmsit.in or @bmsit.ac.in email.','ACCESS_DENIED');
+ const member=await one('SELECT user_id,name FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
+ const student=await one('SELECT name FROM student_records WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
+ // Existing IDs own complaints and updates. New accounts use a stable server-derived ID.
+ const userId=member?.user_id||'campuscare:'+await digest(email),name=student?.name||member?.name||email;
+ const user={userId,email,displayName:name,fullName:name};
+ await assertEligibility(user);return user;
+}
+export async function getVerifiedIdentity():Promise<CampusUser|null>{
+ const token=await currentToken();if(!/^[a-f0-9]{64}$/.test(token))return null;
+ const session=await one("SELECT user_id,email FROM otp_sessions WHERE token_hash=? AND expires_at>? AND challenge_id LIKE 'login-%'",await digest(token),Date.now());
+ if(!session)return null;
+ const member=await one('SELECT name FROM members WHERE org_id=? AND email=? AND user_id=?',PILOT_ORG_ID,session.email,session.user_id);
+ const student=await one('SELECT name FROM student_records WHERE org_id=? AND email=?',PILOT_ORG_ID,session.email);
+ const name=student?.name||member?.name||session.email;
+ return {userId:session.user_id,email:session.email,displayName:name,fullName:name};
+}
+export async function assertEligibility(user:CampusUser){
  const email=normaliseEmail(user.email),now=Date.now();
+ if(!isPilotEmail(email))throw new HttpError(403,'Use your official BMSIT email.','ACCESS_DENIED');
+ const member=await one('SELECT * FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
+ if(member&&(!member.active||member.user_id&&member.user_id!==user.userId))throw new HttpError(403,'Your BMSIT account is unavailable. Contact the administrator.','ACCESS_DENIED');
  const student=await one('SELECT s.*,c.active cohort_active,c.starts_at,c.ends_at FROM student_records s JOIN cohorts c ON c.id=s.cohort_id AND c.org_id=s.org_id WHERE s.org_id=? AND s.email=?',PILOT_ORG_ID,email);
  if(student){
   if(student.status!=='active'||!student.cohort_active||now<student.starts_at||now>=student.ends_at)throw new HttpError(403,'Student access has ended or is inactive. Contact the BMSIT administrator.','ACCESS_DENIED');
@@ -28,28 +51,26 @@ export async function assertEligibility(user:ChatGPTUser){
  }
  // The designated setup administrator and explicitly approved staff can manage the pilot.
  // A student record, when present, takes precedence even for a privileged member.
- const member=await one('SELECT * FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
- if(member&&(!member.active||member.user_id&&member.user_id!==user.userId))throw new HttpError(403,'Your BMSIT account is unavailable. Contact the administrator.','ACCESS_DENIED');
  if(email===normaliseEmail(env.BMSIT_ADMIN_EMAIL||'')||member&&['admin','verifier','technician'].includes(member.role))return;
  throw new HttpError(403,'Your email is not on the approved current-student list. Ask the BMSIT administrator to check your student record and batch.','ACCESS_DENIED');
 }
-export async function hasVerifiedSession(user:ChatGPTUser){
+export async function hasVerifiedSession(user:CampusUser){
  const token=await currentToken();if(!/^[a-f0-9]{64}$/.test(token))return false;
- return !!await one('SELECT token_hash FROM otp_sessions WHERE token_hash=? AND user_id=? AND email=? AND expires_at>?',await digest(token),user.userId,normaliseEmail(user.email),Date.now());
+ return !!await one("SELECT token_hash FROM otp_sessions WHERE token_hash=? AND user_id=? AND email=? AND expires_at>? AND challenge_id LIKE 'login-%'",await digest(token),user.userId,normaliseEmail(user.email),Date.now());
 }
-export async function verificationChallenge(user:ChatGPTUser){
+export async function verificationChallenge(user:CampusUser){
  const row=await one("SELECT challenge_id,expires_at,last_sent_at,attempts,delivery,consumed_at FROM otp_challenges WHERE user_id=? AND email=?",user.userId,normaliseEmail(user.email));
  if(!row||row.delivery!=='sent'||row.consumed_at!==null)return null;
  return {challengeId:row.challenge_id,expiresAt:row.attempts>=5?0:row.expires_at,resendAt:row.last_sent_at+60_000};
 }
-export async function requireVerifiedAccess(user:ChatGPTUser){
+export async function requireVerifiedAccess(user:CampusUser){
  await assertEligibility(user);
  if(!await hasVerifiedSession(user))throw new HttpError(428,'Verify your BMSIT email with the code sent to your mailbox before accessing CampusCare.','EMAIL_VERIFICATION_REQUIRED');
 }
-export async function sendVerificationCode(user:ChatGPTUser){
+export async function sendVerificationCode(user:CampusUser){
  await assertEligibility(user);
  if(!mailConfigured())throw new HttpError(503,'Email verification is not configured yet. Contact the CampusCare administrator.');
- const now=Date.now(),id=uid();let number:number;
+ const now=Date.now(),id=LOGIN_CHALLENGE_PREFIX+uid();let number:number;
  do{number=crypto.getRandomValues(new Uint32Array(1))[0];}while(number>=4_294_000_000);
  const code=(number%1_000_000).toString().padStart(6,'0'),hash=await codeHash(id,user,code),email=normaliseEmail(user.email);
  const reserved=await one(`INSERT INTO otp_challenges (user_id,email,challenge_id,code_hash,expires_at,last_sent_at,window_started_at,send_count) VALUES (?,?,?,?,?,?,?,1)
@@ -68,11 +89,11 @@ export async function sendVerificationCode(user:ChatGPTUser){
   await stmt("UPDATE otp_challenges SET delivery='failed',code_hash='',expires_at=0 WHERE user_id=? AND challenge_id=?",user.userId,id).run();
   throw new HttpError(503,'The verification email could not be sent. Please retry later or contact the administrator.');
  }
- return {challengeId:id,expiresAt:now+CODE_TTL,resendAt:now+60_000};
+ return {email,challengeId:id,expiresAt:now+CODE_TTL,resendAt:now+60_000};
 }
-export async function verifyCode(user:ChatGPTUser,id:string,code:string){
+export async function verifyCode(user:CampusUser,id:string,code:string){
  await assertEligibility(user);
- if(!/^[0-9]{6}$/.test(code)||!id||id.length>100)throw new HttpError(400,'Enter the six-digit code from your latest verification email.');
+ if(!/^[0-9]{6}$/.test(code)||!id.startsWith(LOGIN_CHALLENGE_PREFIX)||id.length>100)throw new HttpError(400,'Enter the six-digit code from your latest verification email.');
  const now=Date.now(),hash=await codeHash(id,user,code),marker=uid(),token=hex(crypto.getRandomValues(new Uint8Array(32)).buffer),tokenHash=await digest(token);
  const result=await db().batch([
   stmt("UPDATE otp_challenges SET attempts=attempts+1,attempt_marker=? WHERE user_id=? AND email=? AND challenge_id=? AND delivery='sent' AND expires_at>? AND attempts<5 AND consumed_at IS NULL",marker,user.userId,normaliseEmail(user.email),id,now),
