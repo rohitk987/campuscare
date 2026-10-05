@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {Miniflare} from 'miniflare';
+import {decodeMailParts,assertMailContent} from './helpers/mail.mjs';
 
 const sender='24ug1bybs030@bmsit.in';
 const scope='openid email https://www.googleapis.com/auth/gmail.send';
@@ -36,6 +37,7 @@ test('production Gmail adapter can construct and execute each request in workerd
   assert.equal(request.url,'https://gmail.googleapis.com/gmail/v1/users/me/messages/send');
   const mime=Buffer.from((await request.json()).raw,'base64url').toString('utf8');
   assert.ok(mime.includes(`To: <${sender}>\r\n`));
+  assertMailContent(decodeMailParts(mime),'123456');
   return Response.json({id:'synthetic-message-id'});
  });
  assert.equal(result.status,200);assert.equal(result.body.provider,'gmail');assert.equal(calls.length,3);

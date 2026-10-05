@@ -17,7 +17,7 @@ import java.net.URLEncoder
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
-const val DEFAULT_BASE_URL = "https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site"
+const val DEFAULT_BASE_URL = "https://campuscare.signaltradehq.workers.dev"
 
 /** A deliberately small native client for the existing authenticated CampusCare API. */
 class ApiClient(serverUrl: String = DEFAULT_BASE_URL) {

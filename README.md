@@ -2,7 +2,7 @@
 
 A facility reporting and maintenance portal, currently restricted to the **BMSIT pilot**. The underlying organisation model is retained for future rollouts.
 
-[Hosted preview](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site) · [GitHub source](https://github.com/rohitk987/campuscare)
+[CampusCare website](https://campuscare.signaltradehq.workers.dev) · [GitHub source](https://github.com/rohitk987/campuscare)
 
 ## Android app
 
@@ -35,6 +35,8 @@ Authentication uses **direct BMSIT email and OTP sign-in**. Visitors enter their
 The shared login page can be opened by link; complaints, evidence and administration require a BMSIT identity, email OTP, current eligibility and the appropriate active membership. GPS is requested only for new complaints, never for sign-in or tracking.
 
 The initial administrator's official email is configured through the hosted secret `BMSIT_ADMIN_EMAIL`. It is never supplied by the browser. The first ordinary visitor never becomes administrator. Other approved current students become reporters after OTP verification; pre-approved staff invitations retain their assigned roles. Existing inactive or already-claimed invitations cannot be reclaimed.
+
+The public address uses a small Cloudflare Worker that forwards to the existing Site backend, retaining the database, photos and sender. The visible website address no longer contains `chatgpt.site`; the original backend must remain online. See [free address setup](hosting/free-address/README.md). Users sign in once on the new hostname because session cookies are host-bound.
 
 ## First use
 
@@ -75,7 +77,9 @@ node --test tests/*.test.mjs
 npm run build
 ```
 
-The 14 domain tests cover location and workflow rules. Forty-two pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Gmail tests cover verified sender matching, scope checks, revoked authorization, identity-service failure, rejected delivery and configuration/header validation. Roster search runs on the server and returns pages of 100 records, so administrators can find and suspend records beyond the original 2,000-row limit. Four client tests check cross-tab account switching and delayed responses without allowing old privileged data to return. Four OAuth setup tests check Desktop client parsing, state/PKCE, callback validation and token/identity checks. Two additional tests execute the production mail adapter inside workerd and reject redirects without forwarding credentials. Three history regressions cover older complaints behind 600 inaccessible reports, 605 accessible reports with equal timestamps, and technician/site privacy. The 66 automated tests use synthetic provider responses. The owner confirmed receipt and verification during the earlier sender setup. The updated direct login must also be checked in a real browser with the emailed code. See [Gmail sender setup](docs/GMAIL-SENDER-SETUP.md). Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
+The 14 domain tests cover location and workflow rules. Forty-two pilot access tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Gmail tests cover verified sender matching, scope checks, revoked authorization, identity-service failure, rejected delivery and configuration/header validation. Roster search runs on the server and returns pages of 100 records, so administrators can find and suspend records beyond the original 2,000-row limit. Four client tests check cross-tab account switching and delayed responses without allowing old privileged data to return. Four OAuth setup tests check Desktop client parsing, state/PKCE, callback validation and token/identity checks. Two additional tests execute the production mail adapter inside workerd and reject redirects without forwarding credentials. Three history regressions cover older complaints behind 600 inaccessible reports, 605 accessible reports with equal timestamps, and technician/site privacy. The 73 automated tests use synthetic provider responses. The owner confirmed receipt and verification during the earlier sender setup. The updated direct login must also be checked in a real browser with the emailed code. See [Gmail sender setup](docs/GMAIL-SENDER-SETUP.md). Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
+
+Two email-template tests and MIME transport checks cover the HTML and plain-text alternatives, leading-zero codes and safe interpolation. Five tests execute the free-address proxy inside workerd and check session forwarding, cross-origin rejection, fixed upstream routing, separate cookies and redirect protection. The email preview uses a synthetic code; inbox rendering still requires a real delivery check.
 
 ## Application structure
 
@@ -116,7 +120,7 @@ This is a functional prototype, not a claim of production certification.
 - The implemented geofences are circles, not surveyed polygons or indoor floor positioning. Real campuses need on-site validation and may benefit from polygon support.
 - The current category catalogue is shared; configurable category templates, teams/routing rules, bulk roster import, logo upload and institutional SSO are follow-up extensions.
 - In-app notifications are implemented for reporters. Following currently provides a followed-issues view; follower-specific notifications, email/SMS, scheduled reminders and automatic escalations are not implemented.
-- Subscription billing, payment collection, custom domains and a platform-wide commercial administration console are not implemented.
+- Subscription billing, payment collection and a platform-wide commercial administration console are not implemented.
 - This build does not configure automated backups, restores, retention jobs or orphan-upload cleanup. Establish and test these before collecting real evidence at scale. Protect credentials, configure customer access, and review applicable institutional requirements before a pilot.
 - Production deployment uses logical `DB` and `BUCKET` bindings in `.openai/hosting.json`; Sites provisions resources and applies migrations. Existing migration history must not be rewritten after deployment.
 

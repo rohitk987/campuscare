@@ -11,7 +11,7 @@ Screenshots show fictional local sample data. [Download the Android preview](htt
 
 ## Install the preview
 
-Install `CampusCare-Android-preview.apk` on Android 8.0 or later. Open **CampusCare**, then **Sign in to your workspace**. The default server is the existing [CampusCare portal](https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site). The linked 0.1 release is historical and predates the BMSIT OTP policy. Build the current source for the new access handling. Students need an official BMSIT account, a current approved enrollment record and email OTP verification.
+Install `CampusCare-Android-preview.apk` on Android 8.0 or later. Open **CampusCare**, then **Sign in to your workspace**. The default server is the existing [CampusCare portal](https://campuscare.signaltradehq.workers.dev). The linked 0.1 release is historical and predates the BMSIT OTP policy. Build the current source for the new access handling. Students need an official BMSIT account, a current approved enrollment record and email OTP verification.
 
 This APK is a debug-signed development preview, not a Play Store release. Android may ask you to permit installation from the app used to open the APK.
 

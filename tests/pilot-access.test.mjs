@@ -4,6 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {build} from 'esbuild';
 import {isPilotEmail, PILOT_ORG_ID} from '../lib/pilot.ts';
+import {decodeMailParts,assertMailContent} from './helpers/mail.mjs';
 
 // Run the production API handlers and migrations with real cookie authentication,
 // transactional SQLite D1 adapter, and synthetic email delivery. Nothing is sent.
@@ -37,7 +38,9 @@ globalThis.fetch=async(url,options)=>{
   assert.equal(options.headers.Authorization,'Bearer synthetic-access-token');assert.equal(options.redirect,'manual');
   const raw=JSON.parse(options.body).raw;assert.match(raw,/^[A-Za-z0-9_-]+$/);
   const mime=Buffer.from(raw,'base64url').toString('utf8');
-  const email=mime.match(/^To: <([^>]+)>\r?$/m)[1],code=mime.match(/code is ([0-9]{6})/)[1];
+  const message=decodeMailParts(mime);
+  const email=mime.match(/^To: <([^>]+)>\r?$/m)[1],code=message.text.match(/code is ([0-9]{6})/)[1];
+  assertMailContent(message,code);
   assert.ok(mime.includes(`From: CampusCare <${state.env.GMAIL_SENDER_EMAIL}>\r\n`));
   assert.ok(mime.includes('Content-Type: text/plain; charset=UTF-8\r\n'));
   emails.push({email,code});
@@ -45,6 +48,7 @@ globalThis.fetch=async(url,options)=>{
  }
  assert.equal(url,'https://api.resend.com/emails');
  const message=JSON.parse(options.body);
+ assertMailContent(message,message.text.match(/code is ([0-9]{6})/)[1]);
  emails.push({email:message.to[0],code:message.text.match(/code is ([0-9]{6})/)[1]});
  assert.match(options.headers['Idempotency-Key'],/^campuscare-otp\//);
  return Response.json(deliveryStatus===200?{id:'synthetic-email'}:{error:'synthetic failure'},{status:deliveryStatus});

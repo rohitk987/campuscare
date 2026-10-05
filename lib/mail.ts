@@ -1,8 +1,8 @@
 import {env} from 'cloudflare:workers';
 import {isPilotEmail,normaliseEmail} from './pilot';
+import {verificationEmail} from './email-template';
 
 const SEND_SCOPE='https://www.googleapis.com/auth/gmail.send';
-const subject='Your CampusCare BMSIT verification code';
 type MailStage='configuration'|'token'|'token_validation'|'userinfo'|'sender_match'|'send'|'acceptance'|'resend';
 const providerReasons=new Set(['invalid_grant','invalid_client','invalid_scope','access_denied','unauthorized_client',
  'accessNotConfigured','domainPolicy','authError','insufficientPermissions','failedPrecondition','invalidArgument',
@@ -49,7 +49,9 @@ export function mailConfigured(){
   !!env.GMAIL_SENDER_EMAIL&&validMailbox(env.GMAIL_SENDER_EMAIL);
  return provider==='resend'&&!!env.RESEND_API_KEY&&!!env.OTP_FROM_EMAIL;
 }
-const base64url=(text:string)=>btoa(text).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const base64=(text:string)=>btoa(Array.from(new TextEncoder().encode(text),byte=>String.fromCharCode(byte)).join(''));
+const base64url=(text:string)=>base64(text).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const mimeBody=(text:string)=>base64(text).match(/.{1,76}/g)!.join('\r\n');
 async function responseObject(response:Response,stage:MailStage):Promise<Record<string,unknown>>{
  let value:unknown;
  try{value=await response.json();}catch{throw new MailDeliveryError(stage,response.status,'invalid_json');}
@@ -62,7 +64,7 @@ export async function deliverVerificationCode(email:string,code:string,challenge
  email=normaliseEmail(email);
  if(!isPilotEmail(email)||!validMailbox(email)||!/^\d{6}$/.test(code)||!/^[-a-z0-9]{1,100}$/i.test(challengeId)||!mailConfigured())
   throw new MailDeliveryError('configuration');
- const text=`Your CampusCare verification code is ${code}. It expires in 5 minutes. Do not share this code. If you did not request it, ignore this email.`;
+ const {subject,text,html}=verificationEmail(code);
  if(env.OTP_MAIL_PROVIDER==='gmail'){
   const tokenResponse=await mailFetch('token','https://oauth2.googleapis.com/token',{
    method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
@@ -82,9 +84,13 @@ export async function deliverVerificationCode(email:string,code:string,challenge
   if(identity.email_verified!==true||typeof identity.email!=='string'||
    normaliseEmail(identity.email)!==normaliseEmail(env.GMAIL_SENDER_EMAIL!))
    throw new MailDeliveryError('sender_match',identityResponse.status,'sender_not_verified_or_mismatch');
+  const boundary='campuscare-'+crypto.randomUUID();
   const mime=[`From: CampusCare <${env.GMAIL_SENDER_EMAIL}>`,`To: <${email}>`,`Subject: ${subject}`,
    `Date: ${new Date().toUTCString()}`,`Message-ID: <${challengeId}@${env.GMAIL_SENDER_EMAIL!.split('@')[1]}>`,
-   'MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: 7bit','',text].join('\r\n');
+   'MIME-Version: 1.0',`Content-Type: multipart/alternative; boundary="${boundary}"`,'',
+   `--${boundary}`,'Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',mimeBody(text),
+   `--${boundary}`,'Content-Type: text/html; charset=UTF-8','Content-Transfer-Encoding: base64','',mimeBody(html),
+   `--${boundary}--`,''].join('\r\n');
   const response=await mailFetch('send','https://gmail.googleapis.com/gmail/v1/users/me/messages/send',{
    method:'POST',headers:{Authorization:'Bearer '+token.access_token,'Content-Type':'application/json'},
    body:JSON.stringify({raw:base64url(mime)}),signal:AbortSignal.timeout(20_000),
@@ -97,7 +103,7 @@ export async function deliverVerificationCode(email:string,code:string,challenge
  }
  const response=await mailFetch('resend','https://api.resend.com/emails',{
   method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json','Idempotency-Key':'campuscare-otp/'+challengeId},
-  body:JSON.stringify({from:env.OTP_FROM_EMAIL,to:[email],subject,text}),signal:AbortSignal.timeout(20_000),
+  body:JSON.stringify({from:env.OTP_FROM_EMAIL,to:[email],subject,text,html}),signal:AbortSignal.timeout(20_000),
  });
  if(!response.ok)throw await providerFailure(response,'resend');
  const result=await responseObject(response,'acceptance');
