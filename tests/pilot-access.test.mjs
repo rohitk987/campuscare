@@ -9,6 +9,7 @@ import {decodeMailParts,assertMailContent} from './helpers/mail.mjs';
 // Run the production API handlers and migrations with real cookie authentication,
 // transactional SQLite D1 adapter, and synthetic email delivery. Nothing is sent.
 let database, visitor=null, cookie='', emails=[], deliveryStatus=200,failSentUpdate=false;
+const storedPhotos=new Map();
 const SEND_SCOPE='https://www.googleapis.com/auth/gmail.send';
 let gmailTokenStatus=200,gmailScope='openid email '+SEND_SCOPE,gmailSender='',gmailIdentityStatus=200,gmailVerified=true,gmailFailureReason='',gmailMessageId='synthetic-gmail-id',providerCalls=[];
 const actualNow=Date.now, actualFetch=globalThis.fetch;
@@ -22,6 +23,11 @@ function prepared(sql,values=[]){
 state.env.DB={prepare:prepared,batch:async statements=>{
  database.exec('BEGIN');try{const results=statements.map(statement=>statement.execute());database.exec('COMMIT');return results;}catch(error){database.exec('ROLLBACK');throw error;}
 }};
+state.env.BUCKET={
+ put:async(key,bytes)=>storedPhotos.set(key,new Uint8Array(bytes)),
+ get:async key=>storedPhotos.has(key)?{body:storedPhotos.get(key)}:null,
+ delete:async key=>storedPhotos.delete(key),
+};
 globalThis.__campuscarePilotTest=state;
 globalThis.fetch=async(url,options)=>{
  providerCalls.push(url);
@@ -86,7 +92,7 @@ async function signIn(email,id=email){
 }
 beforeEach(()=>{
  database?.close();database=new DatabaseSync(':memory:');for(const migration of migrations)database.exec(migration);
- now=actualNow();visitor=null;cookie='';emails=[];deliveryStatus=200;failSentUpdate=false;gmailTokenStatus=200;gmailScope='openid email '+SEND_SCOPE;gmailSender=ADMIN;gmailIdentityStatus=200;gmailVerified=true;gmailFailureReason='';gmailMessageId='synthetic-gmail-id';providerCalls=[];
+ now=actualNow();visitor=null;cookie='';emails=[];storedPhotos.clear();deliveryStatus=200;failSentUpdate=false;gmailTokenStatus=200;gmailScope='openid email '+SEND_SCOPE;gmailSender=ADMIN;gmailIdentityStatus=200;gmailVerified=true;gmailFailureReason='';gmailMessageId='synthetic-gmail-id';providerCalls=[];
  delete state.env.GMAIL_CLIENT_ID;delete state.env.GMAIL_CLIENT_SECRET;delete state.env.GMAIL_REFRESH_TOKEN;delete state.env.GMAIL_SENDER_EMAIL;
  state.env.OTP_MAIL_PROVIDER='resend';
  Object.assign(state.env,{BMSIT_ADMIN_EMAIL:ADMIN,RESEND_API_KEY:'synthetic-test-key',OTP_FROM_EMAIL:'CampusCare Test <otp@example.test>',OTP_HMAC_SECRET:'synthetic-test-secret-only-at-least-32-characters'});
@@ -410,4 +416,110 @@ test('technician history preserves own and assigned private issues while enforci
  const workspace=await response.json();assert.deepEqual(workspace.tickets.map(ticket=>ticket.id),['old-shared','old-own','old-assigned']);
  assert.equal(workspace.tickets.find(ticket=>ticket.id==='old-assigned').can_view_evidence,true);
  assert.equal(workspace.tickets.find(ticket=>ticket.id==='old-shared').can_view_evidence,false);
+});
+
+// Fictional coordinates and a generated 8x8 JPEG exercise the real reporting
+// handlers. These fixtures do not establish GPS authenticity or campus mapping.
+const reportJpeg=Buffer.from('/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAABv/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AIAB6Ev/2Q==','base64');
+const reportPosition=(changes={})=>({latitude:13,longitude:77,accuracy:8,timestamp:now,...changes});
+function mappedFacility(){
+ syntheticFacility('mapped');
+ database.prepare('UPDATE sites SET latitude=13,longitude=77,radius=100,enabled=1 WHERE id=?').run('mapped');
+ database.prepare('UPDATE buildings SET latitude=13,longitude=77,radius=25 WHERE id=?').run('building-mapped');
+ database.prepare('INSERT INTO buildings(id,org_id,site_id,name,latitude,longitude,radius) VALUES(?,?,?,?,?,?,?)').run('distant-building',PILOT_ORG_ID,'mapped','Other building',13.0006,77,10);
+ database.prepare('INSERT INTO locations(id,org_id,building_id,floor,name) VALUES(?,?,?,?,?)').run('distant-room',PILOT_ORG_ID,'distant-building','First','Other room');
+ database.prepare('INSERT INTO locations(id,org_id,building_id,floor,name) VALUES(?,?,?,?,?)').run('upper-room',PILOT_ORG_ID,'building-mapped','First','Upper room');
+}
+async function startReport(changes={}){
+ const response=await post('start_report',{orgId:PILOT_ORG_ID,siteId:'mapped',position:reportPosition(),...changes});
+ assert.equal(response.status,200,await response.clone().text());return response.json();
+}
+async function captureReport(sessionId,{locationId='room-mapped',position=reportPosition(),bytes=reportJpeg}={}){
+ const data=new FormData();for(const [key,value] of Object.entries({orgId:PILOT_ORG_ID,sessionId,locationId,position:JSON.stringify(position)}))data.set(key,value);
+ data.set('photo',new Blob([bytes],{type:'image/jpeg'}),'capture.jpg');
+ return campus.POST(new Request('https://campus.test/api/campuscare?op=photo',{method:'POST',headers:{'X-Campuscare-Request':'1','Origin':'https://campus.test'},body:data}));
+}
+const submitReport=(sessionId,changes={})=>post('submit',{orgId:PILOT_ORG_ID,sessionId,locationId:'room-mapped',title:'Projector image is flickering',description:'The projector flickers during use and needs inspection.',item:'Projector',category:'Classroom technology',visibility:'shared',...changes});
+async function reportAsStudent(){const email='reporter@bmsit.in';approve(email);await signIn(email);mappedFacility();return email;}
+
+test('remote tracking works while disabled, outside, inaccurate and stale locations cannot start a report',async()=>{
+ await reportAsStudent();assert.equal((await get(`op=workspace&org=${PILOT_ORG_ID}`)).status,200);
+ for(const position of [reportPosition({latitude:14}),reportPosition({accuracy:60}),reportPosition({timestamp:now-30_001}),reportPosition({timestamp:now+10_001})]){
+  assert.equal((await post('start_report',{orgId:PILOT_ORG_ID,siteId:'mapped',position})).status,422);
+ }
+ database.prepare('UPDATE sites SET enabled=0 WHERE id=?').run('mapped');
+ assert.equal((await post('start_report',{orgId:PILOT_ORG_ID,siteId:'mapped',position:reportPosition()})).status,422);
+ assert.equal(row('SELECT COUNT(*) n FROM report_sessions').n,0);
+});
+test('capture requires a fresh reading in the selected building and a JPEG before submission',async()=>{
+ await reportAsStudent();const {sessionId}=await startReport();
+ assert.equal((await submitReport(sessionId)).status,422);
+ for(const options of [{position:reportPosition({latitude:14})},{position:reportPosition({timestamp:now-30_001})},{locationId:'distant-room'}])assert.equal((await captureReport(sessionId,options)).status,422);
+ assert.equal((await captureReport(sessionId,{bytes:Buffer.alloc(200)})).status,400);
+ assert.equal(storedPhotos.size,0);
+ assert.equal((await captureReport(sessionId)).status,200);
+ assert.equal((await submitReport(sessionId,{locationId:'upper-room'})).status,400);
+ now+=120_001;assert.equal((await submitReport(sessionId)).status,422);
+ assert.equal(row('SELECT COUNT(*) n FROM complaints').n,0);
+});
+test('reporting sessions are bound to the verified account, site scope and expiry',async()=>{
+ const owner=await reportAsStudent(),ownerCookie=cookie,{sessionId}=await startReport();
+ approve('other@bmsit.in');await signIn('other@bmsit.in');
+ assert.equal((await captureReport(sessionId)).status,409);assert.equal((await submitReport(sessionId)).status,409);
+ cookie=ownerCookie;visitor=user(owner);
+ database.prepare('UPDATE members SET site_scope=? WHERE email=?').run('another-site',owner);
+ assert.equal((await captureReport(sessionId)).status,403);
+ database.prepare('UPDATE members SET site_scope=? WHERE email=?').run('*',owner);
+ now+=15*60_000+1;assert.equal((await captureReport(sessionId)).status,409);assert.equal((await submitReport(sessionId)).status,409);
+ assert.equal(storedPhotos.size,0);
+});
+test('a fresh private-area report retains geotags and audit history, with idempotent submission',async()=>{
+ await reportAsStudent();database.prepare('UPDATE locations SET private=1 WHERE id=?').run('room-mapped');
+ const {sessionId,candidates}=await startReport();assert.deepEqual(candidates.map(building=>building.id),['building-mapped']);
+ assert.equal((await captureReport(sessionId)).status,200);
+ const response=await submitReport(sessionId);assert.equal(response.status,200);const {id}=await response.json();
+ assert.equal((await (await submitReport(sessionId)).json()).id,id);
+ const ticket=row('SELECT * FROM complaints WHERE id=?',id);assert.equal(ticket.visibility,'private');assert.equal(ticket.verification,'pending');
+ assert.equal(row('SELECT COUNT(*) n FROM complaints').n,1);assert.equal(row('SELECT COUNT(*) n FROM events').n,1);
+ assert.equal(row('SELECT consumed FROM report_sessions WHERE id=?',sessionId).consumed,1);
+ assert.equal((await captureReport(sessionId)).status,409);
+ const detail=await (await get(`op=detail&org=${PILOT_ORG_ID}&id=${id}`)).json();
+ assert.equal(detail.evidence.latitude,13);assert.equal(detail.evidence.longitude,77);assert.equal(detail.evidence.accuracy,8);
+ assert.equal(detail.evidence.captured_at,now);assert.equal(detail.evidence.available,true);assert.equal('image_key' in detail.evidence,false);
+});
+test('photo access stays private even when a complaint summary is shared',async()=>{
+ const owner=await reportAsStudent(),ownerCookie=cookie,{sessionId}=await startReport();
+ assert.equal((await captureReport(sessionId)).status,200);const {id}=await (await submitReport(sessionId)).json();
+ const query=`op=photo&org=${PILOT_ORG_ID}&id=${id}`;
+ const ownPhoto=await get(query);assert.equal(ownPhoto.status,200);assert.deepEqual(Buffer.from(await ownPhoto.arrayBuffer()),reportJpeg);
+ approve('viewer@bmsit.in');await signIn('viewer@bmsit.in');assert.equal((await get(query)).status,403);
+ const shared=await (await get(`op=detail&org=${PILOT_ORG_ID}&id=${id}`)).json();assert.equal(shared.evidence,null);assert.deepEqual(shared.events,[]);assert.equal(shared.ticket.can_view_evidence,false);
+ cookie=ownerCookie;visitor=user(owner);assert.equal((await get(query)).status,200);
+});
+test('mapped boundary changes invalidate captured evidence before submission',async()=>{
+ await reportAsStudent();const {sessionId}=await startReport();assert.equal((await captureReport(sessionId)).status,200);
+ database.prepare('UPDATE sites SET enabled=0 WHERE id=?').run('mapped');assert.equal((await submitReport(sessionId)).status,422);
+ database.prepare('UPDATE sites SET enabled=1 WHERE id=?').run('mapped');
+ database.prepare('UPDATE buildings SET latitude=14 WHERE id=?').run('building-mapped');assert.equal((await submitReport(sessionId)).status,422);
+ assert.equal(row('SELECT COUNT(*) n FROM complaints').n,0);
+});
+test('verified reporter, admin and assigned technician complete repair and reviewed reopening with version checks',async()=>{
+ const reporter=await reportAsStudent(),reporterCookie=cookie,{sessionId}=await startReport();
+ assert.equal((await captureReport(sessionId)).status,200);const {id}=await (await submitReport(sessionId)).json();
+ const act=(event,changes={})=>post('ticket_action',{orgId:PILOT_ORG_ID,ticketId:id,event,note:'Synthetic inspection update',version:row('SELECT version FROM complaints WHERE id=?',id).version,...changes});
+ assert.equal((await act('verify')).status,403);assert.equal((await act('resolve')).status,403);
+ await signIn(ADMIN);const adminCookie=cookie;assert.equal((await act('resolve')).status,403);assert.equal((await act('verify')).status,200);
+ const staleVersion=row('SELECT version FROM complaints WHERE id=?',id).version-1;
+ assert.equal((await act('comment',{version:staleVersion})).status,409);
+ approve('worker@bmsit.in');await signIn('worker@bmsit.in');const workerCookie=cookie,worker=row('SELECT id FROM members WHERE email=?','worker@bmsit.in');
+ database.prepare('UPDATE members SET role=? WHERE id=?').run('technician',worker.id);
+ assert.equal((await act('start')).status,403);
+ cookie=adminCookie;assert.equal((await act('assign',{assigneeId:worker.id})).status,200);
+ cookie=workerCookie;for(const event of ['start','hold','start','resolve'])assert.equal((await act(event)).status,200);
+ cookie=reporterCookie;visitor=user(reporter);assert.equal((await act('close')).status,200);assert.equal((await act('request_reopen')).status,200);
+ assert.equal(row('SELECT status FROM complaints WHERE id=?',id).status,'closed');assert.equal((await act('approve_reopen')).status,403);
+ cookie=adminCookie;assert.equal((await act('approve_reopen')).status,200);
+ const ticket=row('SELECT * FROM complaints WHERE id=?',id);assert.equal(ticket.status,'assigned');assert.equal(ticket.reopen,'none');assert.equal(ticket.resolved_at,null);
+ assert.equal(row('SELECT COUNT(*) n FROM complaints').n,1);assert.equal(row('SELECT COUNT(*) n FROM events WHERE complaint_id=?',id).n,10);
+ assert.equal(row('SELECT COUNT(*) n FROM notifications WHERE user_id=?',reporter).n,9);
 });
