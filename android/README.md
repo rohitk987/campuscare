@@ -9,9 +9,9 @@ A native Kotlin / Jetpack Compose client for the existing CampusCare maintenance
 
 Screenshots show fictional local sample data. The old 0.1 GitHub release is historical and predates direct BMSIT OTP login. For a current installable APK, open [the latest Android build](https://github.com/rohitk987/campuscare/actions/workflows/android-build.yml), select a successful run and download its `CampusCare-Android-BMSIT` artifact.
 
-## Install the preview
+## Install the current BMSIT build
 
-Install `CampusCare-Android-preview.apk` on Android 8.0 or later. Open **CampusCare**, then **Sign in to your workspace**. The default server in current source is the [CampusCare portal](https://campuscare-dln.pages.dev). The linked 0.1 release is historical and predates the BMSIT OTP policy. Build the current source for the new access handling. Students need an official BMSIT account, a current approved enrollment record and email OTP verification.
+Download the `CampusCare-Android-BMSIT.apk` artifact from the [latest successful Android build](https://github.com/rohitk987/campuscare/actions/workflows/android-build.yml) and install it on Android 8.0 or later. Open **CampusCare**, then **Sign in to your workspace**. The app connects to the [CampusCare portal](https://campuscare-dln.pages.dev). Students need an official BMSIT account, a current approved enrollment record and email OTP verification.
 
 This APK is a debug-signed development preview, not a Play Store release. Android may ask you to permit installation from the app used to open the APK.
 
@@ -53,7 +53,7 @@ On Windows:
 .\gradlew.bat :app:assembleDebug
 ```
 
-The normal output is `app/build/outputs/apk/debug/app-debug.apk`. Each successful push that changes `android/` also builds an APK and publishes it in GitHub Actions for 90 days. Set `ANDROID_HOME` to your installed SDK, or use an untracked `local.properties` containing `sdk.dir=...`. Signing keys and machine-specific paths are excluded from source control.
+The normal output is `app/build/outputs/apk/debug/app-debug.apk`. Each push that changes Android source or Gradle configuration also builds an APK and publishes it in GitHub Actions for 90 days. Set `ANDROID_HOME` to your installed SDK, or use an untracked `local.properties` containing `sdk.dir=...`. Signing keys and machine-specific paths are excluded from source control.
 
 For a machine with limited space, `CAMPUSCARE_BUILD_ROOT` can place module build output on another drive; `GRADLE_USER_HOME` and Gradle's `--project-cache-dir` control the other caches. No machine-specific drive is hardcoded in application source.
 

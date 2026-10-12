@@ -8,14 +8,22 @@ On 6 October 2026, the source was updated to use CampusCare email OTP login and 
 
 ## Current BMSIT access build
 
-The current source and local `CampusCare-BMSIT-pilot.apk` add BMSIT OTP/enrollment handling. The GitHub `android-preview-0.1` release below is historical and has not been replaced.
+The first local BMSIT pilot APK is retained as `CampusCare-BMSIT-pilot.apk`. The current installable APK is built from GitHub Actions; the 0.1 GitHub release below remains historical.
 
 - Debug APK assembly, instrumentation APK assembly, five access-policy unit tests and Android lint: **passed**.
-- Current local APK SHA-256: `58a9255e6be3b2c35dd80f4b00495d0323223094c33bd6eb5602a95817cdcfe5`.
+- First pilot APK SHA-256: `58a9255e6be3b2c35dd80f4b00495d0323223094c33bd6eb5602a95817cdcfe5`.
 - `NativeAccessTest`: **8 passed, 0 failed, 0 skipped** on the Android 15 / API 35 emulator.
 - The eight tests execute the actual `ApiClient` and `AppState` against synthetic HTTP responses from device loopback. They cover protected-state clearing on HTTP 428 and enrollment revocation; ordinary permission errors; failed workspace verification; same-ID email changes; delayed data/cookie rejection; cancellation of old external and same-origin redirects; WebView cookie use; and OTP logout followed by platform logout, including OTP endpoint failure.
 - No hosted mail, ChatGPT sign-in or live college data is used. Real email delivery and hosted WebView authentication remain unverified until sender credentials and institution-approved records are configured.
 - The shared portal login page is public. Protected data requires exact-domain BMSIT identity, mailbox OTP, current enrollment or explicit staff approval, and active membership.
+
+## Latest installable APK
+
+- GitHub Actions run [38230435659](https://github.com/rohitk987/campuscare/actions/runs/38230435659) built commit `5c5dff39375569adbf8dbb6c04d5f44ed687d356`: **success**.
+- `:app:assembleDebug` passed on the GitHub Android runner. The installable `CampusCare-Android-BMSIT.apk` was downloaded from that run's artifact and checked as a valid APK archive with a manifest and DEX files.
+- APK SHA-256: `8496c5ee0e084509b6eb337a764dc7d2b960a9cc7056252ec096fa20ecbcd245`.
+- The compiled Android client contains the current `campuscare-dln.pages.dev` portal URL. It contains no `workers.dev` or `chatgpt.site` URL.
+- This is a debug APK. The new Android build was compiled, but device installation, physical-phone OTP login, real-campus GPS and camera reporting have not been re-run.
 
 ## Historical first-preview results
 
