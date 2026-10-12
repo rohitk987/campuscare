@@ -19,9 +19,9 @@ The first local BMSIT pilot APK is retained as `CampusCare-BMSIT-pilot.apk`. The
 
 ## Latest installable APK
 
-- GitHub Actions run [38230435659](https://github.com/rohitk987/campuscare/actions/runs/38230435659) built commit `5c5dff39375569adbf8dbb6c04d5f44ed687d356`: **success**.
+- GitHub Actions run [38231647257](https://github.com/rohitk987/campuscare/actions/runs/38231647257) built commit `2f1cbfd711c43bddd569bca3068a4f134b8c56ca`: **success**.
 - `:app:assembleDebug` passed on the GitHub Android runner. The installable `CampusCare-Android-BMSIT.apk` was downloaded from that run's artifact and checked as a valid APK archive with a manifest and DEX files.
-- APK SHA-256: `8496c5ee0e084509b6eb337a764dc7d2b960a9cc7056252ec096fa20ecbcd245`.
+- APK SHA-256: `774a019ee74222d5c0559780330f6cb2aae956b689187d100dc13d2157b5280e`.
 - The compiled Android client contains the current `campuscare-dln.pages.dev` portal URL. It contains no `workers.dev` or `chatgpt.site` URL.
 - This is a debug APK. The new Android build was compiled, but device installation, physical-phone OTP login, real-campus GPS and camera reporting have not been re-run.
 
