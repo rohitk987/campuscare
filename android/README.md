@@ -7,7 +7,7 @@ A native Kotlin / Jetpack Compose client for the existing CampusCare maintenance
   <img src="docs/android-helpdesk.png" width="250" alt="CampusCare native Helpdesk screen" />
 </p>
 
-Screenshots show fictional local sample data. [Download the Android preview](https://github.com/rohitk987/campuscare/releases/tag/android-preview-0.1).
+Screenshots show fictional local sample data. The old 0.1 GitHub release is historical and predates direct BMSIT OTP login. For a current installable APK, open [the latest Android build](https://github.com/rohitk987/campuscare/actions/workflows/android-build.yml), select a successful run and download its `CampusCare-Android-BMSIT` artifact.
 
 ## Install the preview
 
@@ -53,7 +53,7 @@ On Windows:
 .\gradlew.bat :app:assembleDebug
 ```
 
-The normal output is `app/build/outputs/apk/debug/app-debug.apk`. Set `ANDROID_HOME` to your installed SDK, or use an untracked `local.properties` containing `sdk.dir=...`. Signing keys and machine-specific paths are excluded from source control.
+The normal output is `app/build/outputs/apk/debug/app-debug.apk`. Each successful push that changes `android/` also builds an APK and publishes it in GitHub Actions for 90 days. Set `ANDROID_HOME` to your installed SDK, or use an untracked `local.properties` containing `sdk.dir=...`. Signing keys and machine-specific paths are excluded from source control.
 
 For a machine with limited space, `CAMPUSCARE_BUILD_ROOT` can place module build output on another drive; `GRADLE_USER_HOME` and Gradle's `--project-cache-dir` control the other caches. No machine-specific drive is hardcoded in application source.
 

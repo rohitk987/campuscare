@@ -1,0 +1,44 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build CampusCare for Android
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build the debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Give the APK a clear filename
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk CampusCare-Android-BMSIT.apk
+
+      - name: Publish the installable APK as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: CampusCare-Android-BMSIT-${{ github.run_number }}
+          path: CampusCare-Android-BMSIT.apk
+          if-no-files-found: error
+          retention-days: 90
