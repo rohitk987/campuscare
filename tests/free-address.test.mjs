@@ -82,6 +82,81 @@ test(`${publicOrigin}: only anonymous home documents use the short cache`,async(
  }finally{await worker.dispose();}
 });
 
+test(`${publicOrigin}: public home shell ignores only the upstream-scoped bot cookie`,async()=>{
+ let calls=0;
+ const worker=new Miniflare({modules:true,compatibilityDate:config.compatibility_date,compatibilityFlags:config.compatibility_flags,script,outboundService:async request=>{
+  calls++;
+  const headers=new Headers({'Content-Type':'text/html','Cache-Control':'no-store','Vary':'RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch, Next-Url, X-Vinext-Interception-Context, X-Vinext-Mounted-Slots, X-Vinext-Rsc-Render-Mode'});
+  headers.append('Set-Cookie','__cf_bm=upstream-only; Path=/; Domain=chatgpt.site; Secure; HttpOnly; SameSite=None');
+  return new Response(request.headers.has('RSC')?'rsc-variant':'public-home-shell',{headers});
+ }});
+ try{
+  const first=await worker.dispatchFetch(publicOrigin+'/',{method:'GET'});
+  assert.equal(await first.text(),'public-home-shell');
+  assert.equal(first.headers.get('Cache-Control'),'public, max-age=60');
+  assert.equal(first.headers.get('Set-Cookie'),null);
+  const cached=await worker.dispatchFetch(publicOrigin+'/',{method:'GET'});
+  assert.equal(await cached.text(),'public-home-shell');
+  assert.equal(calls,1);
+  const rsc=await worker.dispatchFetch(publicOrigin+'/',{method:'GET',headers:{RSC:'1','Next-Router-State-Tree':'variant'}});
+  assert.equal(await rsc.text(),'rsc-variant');
+  assert.equal(rsc.headers.get('Cache-Control'),'no-store');
+  assert.equal(calls,2);
+  const navigation=await worker.dispatchFetch(publicOrigin+'/',{method:'GET'});
+  assert.equal(await navigation.text(),'public-home-shell');
+  assert.equal(calls,2);
+ }finally{await worker.dispose();}
+});
+
+test(`${publicOrigin}: hashed public assets are edge and browser cacheable`,async()=>{
+ let calls=0;
+ const path='/_next/static/chunks/campuscare-AbCd1234.js';
+ const worker=new Miniflare({modules:true,compatibilityDate:config.compatibility_date,compatibilityFlags:config.compatibility_flags,script,outboundService:async request=>{
+  calls++;assert.equal(request.url,upstream+path);
+  const headers=new Headers({'Content-Type':'text/javascript','Cache-Control':'no-store'});
+  headers.append('Set-Cookie','__cf_bm=upstream-only; Path=/; Domain=chatgpt.site; Secure; HttpOnly; SameSite=None');
+  return new Response('public-fingerprinted-asset',{headers});
+ }});
+ try{
+  const first=await worker.dispatchFetch(publicOrigin+path,{method:'GET'});
+  assert.equal(await first.text(),'public-fingerprinted-asset');
+  assert.equal(first.headers.get('Cache-Control'),'public, max-age=31536000, immutable');
+  assert.equal(first.headers.get('Set-Cookie'),null);
+  const cached=await worker.dispatchFetch(publicOrigin+path,{method:'GET'});
+  assert.equal(await cached.text(),'public-fingerprinted-asset');
+  assert.equal(cached.headers.get('Cache-Control'),'public, max-age=31536000, immutable');
+  assert.equal(calls,1);
+ }finally{await worker.dispose();}
+});
+
+test(`${publicOrigin}: private asset cookies and variable assets are never cached`,async()=>{
+ let calls=0;
+ const path='/_next/static/chunks/campuscare-AbCd5678.js';
+ const worker=new Miniflare({modules:true,compatibilityDate:config.compatibility_date,compatibilityFlags:config.compatibility_flags,script,outboundService:async request=>{
+  calls++;
+  const headers=new Headers({'Content-Type':'text/javascript','Cache-Control':'no-store'});
+  if(request.headers.get('Cookie')?.includes('__Host-campuscare-session='))headers.append('Set-Cookie','__Host-campuscare-session=private-session; Path=/; Secure; HttpOnly; SameSite=Lax');
+  if(calls===2)headers.set('Vary','Cookie');
+  return new Response(`response-${calls}`,{headers});
+ }});
+ try{
+  const sessionResponse=await worker.dispatchFetch(publicOrigin+path,{method:'GET',headers:{Cookie:'__Host-campuscare-session=active'}});
+  assert.equal(await sessionResponse.text(),'response-1');
+  assert.equal(sessionResponse.headers.get('Cache-Control'),'no-store');
+  assert.equal(sessionResponse.headers.getSetCookie()[0].startsWith('__Host-campuscare-session='),true);
+  const variable=await worker.dispatchFetch(publicOrigin+path,{method:'GET'});
+  assert.equal(await variable.text(),'response-2');
+  assert.equal(variable.headers.get('Cache-Control'),'no-store');
+  const retry=await worker.dispatchFetch(publicOrigin+path,{method:'GET'});
+  assert.equal(await retry.text(),'response-3');
+  assert.equal(retry.headers.get('Cache-Control'),'public, max-age=31536000, immutable');
+  const cached=await worker.dispatchFetch(publicOrigin+path,{method:'GET'});
+  assert.equal(await cached.text(),'response-3');
+  assert.equal(cached.headers.get('Cache-Control'),'public, max-age=31536000, immutable');
+  assert.equal(calls,3);
+ }finally{await worker.dispose();}
+});
+
 test(`${publicOrigin}: foreign 307 cannot replay an OTP body`,async()=>{
  let calls=0;
  const result=await run('/api/access',{method:'POST',headers:{Origin:publicOrigin,'X-Campuscare-Request':'1'},body:'{"action":"verify_code","code":"004217"}'},async()=>{
