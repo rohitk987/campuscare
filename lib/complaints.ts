@@ -1,7 +1,8 @@
 import {all} from './server';
+import type {Complaint} from './models';
 
 type Viewer={userId:string;role:string;memberId:string;siteIds:string[]};
-type ComplaintRow=Record<string,unknown>&{id:string;created_at:number};
+type ComplaintRow=Complaint;
 const batchSize=100;
 const selection=`SELECT c.*,l.name room,l.floor,b.name building,s.name site,m.name assignee_name
  FROM complaints c
@@ -24,7 +25,7 @@ export async function visibleComplaints(orgId:string,viewer:Viewer){
   const cursorFilter=cursor?' AND (c.created_at<? OR (c.created_at=? AND c.id<?))':'';
   const params=[orgId,JSON.stringify(viewer.siteIds),viewer.userId,viewer.role,viewer.role,viewer.memberId,
    ...(cursor?[cursor.created_at,cursor.created_at,cursor.id]:[])];
-  const batch=await all(selection+cursorFilter+' ORDER BY c.created_at DESC,c.id DESC LIMIT '+batchSize,...params) as ComplaintRow[];
+  const batch=await all<ComplaintRow>(selection+cursorFilter+' ORDER BY c.created_at DESC,c.id DESC LIMIT '+batchSize,...params);
   tickets.push(...batch);
   if(batch.length<batchSize)return tickets;
   const last=batch[batch.length-1];cursor={id:last.id,created_at:last.created_at};

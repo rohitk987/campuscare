@@ -1,11 +1,12 @@
-import {db,uid,insert,one,stmt} from './server';
-export async function makeOrganisation(user:any,name:string,type:string,demo=false,stableId?:string){
+import {db,uid,insert,one} from './server';
+import type {CampusUser} from './account';
+export async function makeOrganisation(user:CampusUser,name:string,type:string,demo=false,stableId?:string){
  const id=stableId||uid(),memberId=uid(),now=Date.now();
  await db().batch([insert('organisations',{id,name,type,demo:demo?1:0,creator:user.userId,created_at:now,identifier_label:type==='College'?'USN':type==='Office'?'Employee ID':'Member ID'}),insert('members',{id:memberId,org_id:id,user_id:user.userId,email:user.email.toLowerCase(),name:user.fullName||user.displayName,role:'admin'})]);
  if(!demo)return id;
  const siteId=uid();const buildings=type==='College'?['Academic block','Library','Hostel B']:type==='School'?['Learning block','Activity centre','Administration']:['North wing','South wing','Services'];
  const locations=type==='College'?['Room 204','Room 102','Reading room','Water station','Laundry room','Common area']:type==='School'?['Classroom 4B','Science room','Sports hall','Drinking water','Staff room','Reception']:['Meeting room 3','Workstations','Pantry','Washroom','Fitness room','Reception'];
- const queries:any[]=[insert('sites',{id:siteId,org_id:id,name:type==='Office'?'Bengaluru office':'Main campus',enabled:0})];const locationIds:string[]=[];
+ const queries=[insert('sites',{id:siteId,org_id:id,name:type==='Office'?'Bengaluru office':'Main campus',enabled:0})];const locationIds:string[]=[];
  for(let i=0;i<3;i++){const bid=uid();queries.push(insert('buildings',{id:bid,org_id:id,site_id:siteId,name:buildings[i]}));for(let j=0;j<2;j++){const lid=uid();locationIds.push(lid);queries.push(insert('locations',{id:lid,org_id:id,building_id:bid,floor:j?'Ground floor':'First floor',name:locations[i*2+j]}));}}
  const staffId=uid();queries.push(insert('members',{id:staffId,org_id:id,email:'maintenance@example.invalid',name:'Sample maintenance team',role:'technician',site_scope:siteId}));
  const samples=type==='College'?['Projector loses connection','Ceiling fan not rotating','Water filter leaking','Tap does not close fully','Washing machine drainage issue','Loose bench leg','Smart board touch not responding','Corridor light flickering']:type==='School'?['Classroom display not working','Fan making a rattling noise','Sports hall light flickering','Water dispenser leaking','Staff room tap is loose','Reception chair needs repair','Science room socket damaged','Classroom bench leg loose']:['Meeting room display not working','Air conditioner leaking','Pantry tap dripping','Washroom drain blocked','Treadmill belt slipping','Reception light flickering','Meeting room chair broken','Water dispenser needs service'];
@@ -14,7 +15,7 @@ export async function makeOrganisation(user:any,name:string,type:string,demo=fal
  for(let i=0;i<8;i++){const tid=uid(),created=now-(i+1)*5*3600000;queries.push(insert('complaints',{id:tid,org_id:id,site_id:siteId,location_id:locationIds[i%6],reporter_id:user.userId,reporter_name:'Sample reporter',ticket_no:'CC-'+(1048-i),title:samples[i],description:'Fictional sample complaint for exploring the maintenance workflow. '+samples[i]+'. Please inspect the affected fixture and record the repair.',item:samples[i].split(' ').slice(0,3).join(' '),category:cats[i],priority:i===0||i===2?'High':i===5||i===6?'Low':'Medium',verification:states[i][0],status:states[i][1],assignee_id:states[i][0]==='verified'?staffId:null,demo:1,created_at:created,updated_at:created+3600000,resolved_at:i===5||i===6?created+3*3600000:null}));queries.push(insert('events',{id:uid(),org_id:id,complaint_id:tid,actor:'CampusCare demo',action:'sample',note:'Fictional sample record. No location or photo evidence was collected.',created_at:created}));if(states[i][0]==='verified')queries.push(insert('events',{id:uid(),org_id:id,complaint_id:tid,actor:'Sample facilities lead',action:states[i][1],note:i===4?'Awaiting a replacement part.':i===5||i===6?'Sample repair completed and tested.':'Sample record moved to '+states[i][1].replaceAll('_',' ')+'.',created_at:created+3600000}));}
  await db().batch(queries);return id;
 }
-export async function seedWorkspaces(user:any){
+export async function seedWorkspaces(user:CampusUser){
  const existing=await one('SELECT id FROM members WHERE user_id=? AND active=1 LIMIT 1',user.userId);if(existing)return;
  const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(user.userId)))).map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,20);
  for(const [i,[name,type]] of [['Northstar Institute','College'],['Cedar Grove School','School'],['Meridian Offices','Office']].entries()){const id=`demo-${hash}-${i}`;if(!await one('SELECT id FROM organisations WHERE id=?',id))await makeOrganisation(user,name,type,true,id);}

@@ -5,6 +5,7 @@ import {db,stmt,one,HttpError,uid} from './server';
 import {PILOT_ORG_ID,isPilotEmail,normaliseEmail} from './pilot';
 import {deliverVerificationCode,mailFailureDetails} from './mail';
 import {mailConfigured} from './mail';
+import type {Member} from './models';
 export {mailConfigured} from './mail';
 
 export const VERIFICATION_COOKIE='__Host-campuscare-session';
@@ -23,8 +24,8 @@ async function currentToken(){return cookieValue((await headers()).get('cookie')
 export async function loginIdentity(value:string):Promise<CampusUser>{
  const email=normaliseEmail(value);
  if(!isPilotEmail(email))throw new HttpError(403,'Use your official @bmsit.in or @bmsit.ac.in email.','ACCESS_DENIED');
- const member=await one('SELECT user_id,name FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
- const student=await one('SELECT name FROM student_records WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
+ const member=await one<{user_id:string|null;name:string}>('SELECT user_id,name FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
+ const student=await one<{name:string}>('SELECT name FROM student_records WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
  // Existing IDs own complaints and updates. New accounts use a stable server-derived ID.
  const userId=member?.user_id||'campuscare:'+await digest(email),name=student?.name||member?.name||email;
  const user={userId,email,displayName:name,fullName:name};
@@ -32,19 +33,19 @@ export async function loginIdentity(value:string):Promise<CampusUser>{
 }
 export async function getVerifiedIdentity():Promise<CampusUser|null>{
  const token=await currentToken();if(!/^[a-f0-9]{64}$/.test(token))return null;
- const session=await one("SELECT user_id,email FROM otp_sessions WHERE token_hash=? AND expires_at>? AND challenge_id LIKE 'login-%'",await digest(token),Date.now());
+ const session=await one<{user_id:string;email:string}>("SELECT user_id,email FROM otp_sessions WHERE token_hash=? AND expires_at>? AND challenge_id LIKE 'login-%'",await digest(token),Date.now());
  if(!session)return null;
- const member=await one('SELECT name FROM members WHERE org_id=? AND email=? AND user_id=?',PILOT_ORG_ID,session.email,session.user_id);
- const student=await one('SELECT name FROM student_records WHERE org_id=? AND email=?',PILOT_ORG_ID,session.email);
+ const member=await one<{name:string}>('SELECT name FROM members WHERE org_id=? AND email=? AND user_id=?',PILOT_ORG_ID,session.email,session.user_id);
+ const student=await one<{name:string}>('SELECT name FROM student_records WHERE org_id=? AND email=?',PILOT_ORG_ID,session.email);
  const name=student?.name||member?.name||session.email;
  return {userId:session.user_id,email:session.email,displayName:name,fullName:name};
 }
 export async function assertEligibility(user:CampusUser){
  const email=normaliseEmail(user.email),now=Date.now();
  if(!isPilotEmail(email))throw new HttpError(403,'Use your official BMSIT email.','ACCESS_DENIED');
- const member=await one('SELECT * FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
+ const member=await one<Member>('SELECT * FROM members WHERE org_id=? AND email=?',PILOT_ORG_ID,email);
  if(member&&(!member.active||member.user_id&&member.user_id!==user.userId))throw new HttpError(403,'Your BMSIT account is unavailable. Contact the administrator.','ACCESS_DENIED');
- const student=await one('SELECT s.*,c.active cohort_active,c.starts_at,c.ends_at FROM student_records s JOIN cohorts c ON c.id=s.cohort_id AND c.org_id=s.org_id WHERE s.org_id=? AND s.email=?',PILOT_ORG_ID,email);
+ const student=await one<{status:string;cohort_active:number;starts_at:number;ends_at:number}>('SELECT s.*,c.active cohort_active,c.starts_at,c.ends_at FROM student_records s JOIN cohorts c ON c.id=s.cohort_id AND c.org_id=s.org_id WHERE s.org_id=? AND s.email=?',PILOT_ORG_ID,email);
  if(student){
   if(student.status!=='active'||!student.cohort_active||now<student.starts_at||now>=student.ends_at)throw new HttpError(403,'Student access has ended or is inactive. Contact the BMSIT administrator.','ACCESS_DENIED');
   return;
@@ -59,7 +60,7 @@ export async function hasVerifiedSession(user:CampusUser){
  return !!await one("SELECT token_hash FROM otp_sessions WHERE token_hash=? AND user_id=? AND email=? AND expires_at>? AND challenge_id LIKE 'login-%'",await digest(token),user.userId,normaliseEmail(user.email),Date.now());
 }
 export async function verificationChallenge(user:CampusUser){
- const row=await one("SELECT challenge_id,expires_at,last_sent_at,attempts,delivery,consumed_at FROM otp_challenges WHERE user_id=? AND email=?",user.userId,normaliseEmail(user.email));
+ const row=await one<{challenge_id:string;expires_at:number;last_sent_at:number;attempts:number;delivery:string;consumed_at:number|null}>("SELECT challenge_id,expires_at,last_sent_at,attempts,delivery,consumed_at FROM otp_challenges WHERE user_id=? AND email=?",user.userId,normaliseEmail(user.email));
  if(!row||row.delivery!=='sent'||row.consumed_at!==null)return null;
  return {challengeId:row.challenge_id,expiresAt:row.attempts>=5?0:row.expires_at,resendAt:row.last_sent_at+60_000};
 }
@@ -73,7 +74,7 @@ export async function sendVerificationCode(user:CampusUser){
  const now=Date.now(),id=LOGIN_CHALLENGE_PREFIX+uid();let number:number;
  do{number=crypto.getRandomValues(new Uint32Array(1))[0];}while(number>=4_294_000_000);
  const code=(number%1_000_000).toString().padStart(6,'0'),hash=await codeHash(id,user,code),email=normaliseEmail(user.email);
- const reserved=await one(`INSERT INTO otp_challenges (user_id,email,challenge_id,code_hash,expires_at,last_sent_at,window_started_at,send_count) VALUES (?,?,?,?,?,?,?,1)
+ const reserved=await one<{challenge_id:string}>(`INSERT INTO otp_challenges (user_id,email,challenge_id,code_hash,expires_at,last_sent_at,window_started_at,send_count) VALUES (?,?,?,?,?,?,?,1)
  ON CONFLICT(user_id) DO UPDATE SET email=excluded.email,challenge_id=excluded.challenge_id,code_hash=excluded.code_hash,expires_at=excluded.expires_at,attempts=0,consumed_at=NULL,attempt_marker=NULL,delivery='pending',last_sent_at=excluded.last_sent_at,
  window_started_at=CASE WHEN otp_challenges.window_started_at<=? THEN excluded.window_started_at ELSE otp_challenges.window_started_at END,
  send_count=CASE WHEN otp_challenges.window_started_at<=? THEN 1 ELSE otp_challenges.send_count+1 END

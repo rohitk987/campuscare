@@ -28,7 +28,7 @@ function isPublicStaticAsset(headers){
  return /^(?:text\/css|text\/javascript|application\/javascript|font\/|image\/(?:svg\+xml|png|jpeg|webp|avif))\b/.test(type)&&!headers.has('Vary');
 }
 
-export default {
+const campusCareProxy={
  async fetch(request,env,ctx){
   const publicURL=new URL(request.url),origin=request.headers.get('Origin');
   // Validate before rewriting: an arbitrary Origin must never gain same-origin access.
@@ -88,3 +88,5 @@ export default {
   }catch{return error(502,'CampusCare is temporarily unavailable. Please try again.');}
  }
 };
+
+export default campusCareProxy;

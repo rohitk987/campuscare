@@ -6,7 +6,7 @@ import {build} from 'esbuild';
 // Exercise the production root component with a small hook renderer and synthetic
 // API responses. Visual child components are boundaries; access effects are real.
 const original={window:globalThis.window,document:globalThis.document,setInterval:globalThis.setInterval,clearInterval:globalThis.clearInterval};
-let hooks=[],cursor=0,effects=[],dirty=false,tree,visitor,delayed=[],delayWorkspace=false,workspaceCount=0;
+let hooks=[],cursor=0,effects=[],dirty=false,tree,visitor,delayed=[],delayWorkspace=false;
 const listeners=new Map();
 const admin={id:'admin-id',email:'admin@bmsit.in',name:'Admin'},student={id:'student-id',email:'student@bmsit.in',name:'Student'};
 const org={id:'bmsit-pilot',name:'BMSIT',color:'#305bea',demo:0};
@@ -15,13 +15,15 @@ function workspace(identity){return {accessIdentity:{id:identity.id,email:identi
 const harness={
  useState(initial){const index=cursor++;if(!hooks[index])hooks[index]={value:typeof initial==='function'?initial():initial};return [hooks[index].value,next=>{hooks[index].value=typeof next==='function'?next(hooks[index].value):next;dirty=true;}];},
  useRef(initial){const index=cursor++;if(!hooks[index])hooks[index]={value:{current:initial}};return hooks[index].value;},
+ useCallback(callback,deps){const index=cursor++,previous=hooks[index];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps[i])))hooks[index]={deps,value:callback};return hooks[index].value;},
+ useMemo(factory,deps){const index=cursor++,previous=hooks[index];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps[i])))hooks[index]={deps,value:factory()};return hooks[index].value;},
  useEffect(fn,deps){const index=cursor++,previous=hooks[index];if(!previous||!deps||deps.some((value,i)=>!Object.is(value,previous.deps[i]))){hooks[index]={deps,cleanup:previous?.cleanup};effects.push(()=>{previous?.cleanup?.();hooks[index].cleanup=fn();});}},
  api:async()=>({ok:true}),
  accessStatus:async()=>({userId:visitor.id,email:visitor.email,verified:true,configured:true}),
  async read(query){
   const identity=copy(visitor);
   if(query==='op=bootstrap')return {user:identity,organisations:[{...org,role:identity.id===admin.id?'admin':'reporter'}]};
-  workspaceCount++;const response=workspace(identity);
+  const response=workspace(identity);
   if(delayWorkspace){delayWorkspace=false;return new Promise(resolve=>delayed.push(()=>resolve(response)));}
   return response;
  },
@@ -34,7 +36,7 @@ const placeholders=names=>names.map(name=>`export function ${name}(){return null
 const bundle=await build({entryPoints:['app/campuscare.tsx'],bundle:true,write:false,format:'esm',platform:'node',jsx:'automatic',plugins:[{name:'client-test-boundaries',setup(plugin){
  plugin.onResolve({filter:/^(react(?:\/jsx-runtime)?|lucide-react|sonner|@\/components\/ui\/.*|\.\/ui|\.\/access-panel|\.\/signin-panel|\.\/access-client|\.\/admin-dialog|\.\/report-dialog|\.\/ticket-sheet)$/},args=>({path:args.path,namespace:'client-boundary'}));
  plugin.onLoad({filter:/.*/,namespace:'client-boundary'},args=>{
-  if(args.path==='react')return {contents:"export const {useState,useEffect,useRef}=globalThis.__campuscareClientTest;"};
+  if(args.path==='react')return {contents:"export const {useState,useEffect,useRef,useCallback,useMemo}=globalThis.__campuscareClientTest;"};
   if(args.path==='react/jsx-runtime')return {contents:"export const jsx=(type,props)=>({type,props});export const jsxs=jsx;export const Fragment='fragment';"};
   if(args.path==='lucide-react')return {contents:placeholders(iconNames)};
   if(args.path==='./ui')return {contents:placeholders(['Picker','Field','Empty','Busy'])+"\nexport const {api,read}=globalThis.__campuscareClientTest;export const initials=()=>'';export const ago=()=>'';"};
@@ -51,8 +53,8 @@ async function flush(){for(let i=0;i<30;i++){if(dirty)render();await new Promise
 function find(value,predicate){if(!value||typeof value!=='object')return null;if(predicate(value))return value;for(const item of Object.values(value)){if(typeof item==='function')continue;if(Array.isArray(item)){for(const child of item){const found=find(child,predicate);if(found)return found;}}else{const found=find(item,predicate);if(found)return found;}}return null;}
 const containsPrivate=()=>JSON.stringify(tree).includes('Private admin-only issue');
 beforeEach(()=>{
- hooks=[];cursor=0;effects=[];dirty=true;tree=null;visitor=copy(admin);delayed=[];delayWorkspace=false;workspaceCount=0;listeners.clear();
- globalThis.window={addEventListener:(type,fn)=>listeners.set(type,fn),removeEventListener:(type,fn)=>{if(listeners.get(type)===fn)listeners.delete(type);}};
+ hooks=[];cursor=0;effects=[];dirty=true;tree=null;visitor=copy(admin);delayed=[];delayWorkspace=false;listeners.clear();
+ globalThis.window={addEventListener:(type,fn)=>listeners.set(type,fn),removeEventListener:(type,fn)=>{if(listeners.get(type)===fn)listeners.delete(type);},setTimeout,clearTimeout};
  globalThis.document={documentElement:{style:{setProperty(){}}}};
  globalThis.setInterval=()=>1;globalThis.clearInterval=()=>{};
 });
