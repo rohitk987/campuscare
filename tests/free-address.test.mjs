@@ -57,6 +57,31 @@ test(`${publicOrigin}: redirects stay on the public address`,async()=>{
  }
 });
 
+test(`${publicOrigin}: only anonymous home documents use the short cache`,async()=>{
+ let calls=0;
+ const worker=new Miniflare({modules:true,compatibilityDate:config.compatibility_date,compatibilityFlags:config.compatibility_flags,script,outboundService:async()=>{
+  calls++;
+  return new Response(`upstream-${calls}`,{headers:{'Content-Type':calls===1?'text/html':'application/json','Cache-Control':'no-store'}});
+ }});
+ try{
+  const first=await worker.dispatchFetch(publicOrigin+'/',{method:'GET'});
+  assert.equal(await first.text(),'upstream-1');
+  assert.equal(first.headers.get('Cache-Control'),'public, max-age=60');
+  const cached=await worker.dispatchFetch(publicOrigin+'/',{method:'GET'});
+  assert.equal(await cached.text(),'upstream-1');
+  assert.equal(calls,1);
+  const authenticated=await worker.dispatchFetch(publicOrigin+'/',{method:'GET',headers:{Cookie:'__Host-campuscare-session=private-session'}});
+  assert.equal(await authenticated.text(),'upstream-2');
+  assert.equal(authenticated.headers.get('Cache-Control'),'no-store');
+  const api=await worker.dispatchFetch(publicOrigin+'/api/access?op=status',{method:'GET'});
+  assert.equal(await api.text(),'upstream-3');
+  assert.equal(api.headers.get('Cache-Control'),'no-store');
+  const queried=await worker.dispatchFetch(publicOrigin+'/?refresh=1',{method:'GET'});
+  assert.equal(await queried.text(),'upstream-4');
+  assert.equal(queried.headers.get('Cache-Control'),'no-store');
+ }finally{await worker.dispose();}
+});
+
 test(`${publicOrigin}: foreign 307 cannot replay an OTP body`,async()=>{
  let calls=0;
  const result=await run('/api/access',{method:'POST',headers:{Origin:publicOrigin,'X-Campuscare-Request':'1'},body:'{"action":"verify_code","code":"004217"}'},async()=>{

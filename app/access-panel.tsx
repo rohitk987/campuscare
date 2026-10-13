@@ -1,33 +1,11 @@
 'use client';
 import {useEffect,useState,useRef} from 'react';
-import {Building2,Mail,ShieldCheck,GraduationCap} from 'lucide-react';
+import {GraduationCap} from 'lucide-react';
 import {Button} from '@/components/ui/button';
-import {InputOTP,InputOTPGroup,InputOTPSlot} from '@/components/ui/input-otp';
 import {Dialog,DialogContent,DialogHeader,DialogTitle} from '@/components/ui/dialog';
 import {Switch} from '@/components/ui/switch';
 import {Field,Picker,Busy} from './ui';
-import BmsitInformation from './bmsit-information';
-
-export async function accessAction(action:string,data:any={}){
- const response=await fetch('/api/access',{method:'POST',headers:{'Content-Type':'application/json','X-Campuscare-Request':'1'},body:JSON.stringify({action,...data})});
- const result:any=await response.json();if(!response.ok){const error:any=new Error(result.error||'The request could not be completed.');error.status=response.status;throw error;}return result;
-}
-export async function accessStatus(){const response=await fetch('/api/access?op=status',{cache:'no-store'});const result:any=await response.json();if(!response.ok){const error:any=new Error(result.error||'Access could not be checked.');error.status=response.status;throw error;}return result;}
-export async function signOut(){await accessAction('logout');window.location.assign('/');}
-export function VerificationPanel({status={},onVerified,initialError=''}:any){
- const [email,setEmail]=useState(''),[challenge,setChallenge]=useState<any>(null),[code,setCode]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(initialError),[now,setNow]=useState(Date.now());
- useEffect(()=>{const interval=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(interval);},[]);
- const wait=Math.max(0,Math.ceil(((challenge?.resendAt||0)-now)/1000)),expired=!!challenge&&now>=challenge.expiresAt;
- async function send(event?:any){event?.preventDefault();setBusy(true);setError('');try{setChallenge(await accessAction('send_code',{email:challenge?.email||email}));setCode('');setNow(Date.now());}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- async function verify(event:any){event.preventDefault();setBusy(true);setError('');try{await accessAction('verify_code',{email:challenge.email,challengeId:challenge.challengeId,code});await onVerified();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- function anotherEmail(){setChallenge(null);setCode('');setError('');}
- return <main className="signin-page"><section className="signin-card"><div className="brand"><span className="brandmark"><Building2/></span>CampusCare</div><span className="eyebrow">BMSIT · FIRST CAMPUS PILOT</span><h1>{challenge?<>Check your<br/>college mailbox.</>:<>Sign in with your<br/>BMSIT email.</>}</h1><p>{challenge?<>Enter the six-digit code sent to <strong>{challenge.email}</strong>. It expires after five minutes.</>:<>Report a facility issue at BMSIT and follow the repair from anywhere.</>}</p>
- {status.configured===false&&<div role="alert" className="error-box">Email delivery is being configured. Contact the CampusCare administrator; access remains locked until verification is available.</div>}
- {error&&<div role="alert" className="error-box">{error}</div>}
- {!challenge&&<form onSubmit={send} className="space-y-5"><Field label="BMSIT email address" type="email" value={email} onChange={setEmail} required maxLength={200} autoComplete="email" placeholder="yourname@bmsit.in" disabled={busy}/><div className="notice">Use <strong>@bmsit.in</strong> or <strong>@bmsit.ac.in</strong>. Students need an approved current-student record and an active batch.</div><Button type="submit" disabled={busy||status.configured===false||!email.trim()} className="w-full">{busy?<Busy/>:<Mail size={16}/>}Send sign-in code</Button></form>}
- {challenge&&<form onSubmit={verify} className="space-y-5"><label className="text-sm font-semibold" htmlFor="college-otp">Email verification code</label><InputOTP id="college-otp" aria-label="Email verification code" maxLength={6} pattern="^[0-9]*$" value={code} onChange={setCode} disabled={busy||expired} autoComplete="one-time-code" inputMode="numeric"><InputOTPGroup>{Array.from({length:6},(_,index)=><InputOTPSlot key={index} index={index}/>)}</InputOTPGroup></InputOTP><p className="body-copy">{expired?'This code expired. Request a new one.':'Check your inbox and spam folder. Never share this code.'}</p><Button className="w-full" disabled={busy||expired||code.length!==6}>{busy?<Busy/>:<ShieldCheck size={16}/>}Verify and continue</Button></form>}
- {challenge&&<><Button variant="outline" onClick={()=>void send()} disabled={busy||status.configured===false||wait>0} className="w-full"><Mail size={16}/>{wait>0?`Request another code in ${wait}s`:'Send a new code'}</Button><button disabled={busy} className="text-sm underline" onClick={anotherEmail}>Use another email</button></>}<small>Sign in directly with your email code. Location is required only when reporting a new issue.</small><BmsitInformation/></section></main>;
-}
+import {accessAction} from './access-client';
 async function readStudents(search:string,page:number){const params=new URLSearchParams({op:'students',search,page:String(page)});const response=await fetch('/api/access?'+params,{cache:'no-store'});const data:any=await response.json();if(!response.ok){const error:any=new Error(data.error);error.status=response.status;throw error;}return data;}
 const dateInput=(timestamp:number)=>new Date(timestamp+5.5*3_600_000).toISOString().slice(0,10);
 export function StudentAccessPanel({onAccessFailure}:any){

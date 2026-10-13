@@ -5,10 +5,16 @@ const UPSTREAM_ORIGIN='https://campuscare-facility-hub.sepia-pastime9v.chatgpt.s
 const error=(status,message)=>Response.json({error:message},{status,headers:{'Cache-Control':'no-store'}});
 
 export default {
- async fetch(request){
+ async fetch(request,env,ctx){
   const publicURL=new URL(request.url),origin=request.headers.get('Origin');
   // Validate before rewriting: an arbitrary Origin must never gain same-origin access.
   if(origin&&origin!==publicURL.origin)return error(403,'This request must come from CampusCare.');
+  const session=request.headers.get('Cookie')?.split(';').map(part=>part.trim()).find(part=>part.startsWith('__Host-campuscare-session='));
+  // The anonymous home document contains only the app shell. Cache this GET briefly at the edge
+  // to avoid a slow upstream page render; never cache authenticated pages or API responses.
+  const cacheHome=request.method==='GET'&&publicURL.pathname==='/'&&!publicURL.search&&!origin&&!session;
+  const cacheKey=cacheHome?new Request(`${publicURL.origin}/__campuscare_home_v1`):null;
+  if(cacheKey){try{const cached=await caches.default.match(cacheKey);if(cached)return cached;}catch{}}
   const target=new URL(UPSTREAM_ORIGIN);
   target.pathname=publicURL.pathname;target.search=publicURL.search;
   const forwarded=new Request(target,request);
@@ -18,7 +24,6 @@ export default {
     forwarded.headers.delete(name);
   }
   // Other cookies on the public hostname are not credentials for the upstream.
-  const session=request.headers.get('Cookie')?.split(';').map(part=>part.trim()).find(part=>part.startsWith('__Host-campuscare-session='));
   forwarded.headers.delete('Cookie');if(session)forwarded.headers.set('Cookie',session);
   if(origin)forwarded.headers.set('Origin',UPSTREAM_ORIGIN);
   try{
@@ -36,6 +41,12 @@ export default {
     const visible=new URL(publicURL.origin);
     visible.pathname=redirect.pathname;visible.search=redirect.search;visible.hash=redirect.hash;
     headers.set('Location',visible.href);
+   }
+   if(cacheKey&&response.status===200&&headers.get('Content-Type')?.toLowerCase().includes('text/html')&&!headers.has('Set-Cookie')){
+    headers.set('Cache-Control','public, max-age=60');
+    const home=new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+    try{ctx.waitUntil(caches.default.put(cacheKey,home.clone()).catch(()=>{}));}catch{}
+    return home;
    }
    // Keep response streaming and separate Set-Cookie headers. Domainless __Host
    // cookies are set on the public origin; no secret or cookie is stored here.
