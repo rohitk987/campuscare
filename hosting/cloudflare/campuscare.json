@@ -1,0 +1,5 @@
+{
+  "worker": "campuscare-app",
+  "database": "campuscare",
+  "bucket": "campuscare-photos"
+}

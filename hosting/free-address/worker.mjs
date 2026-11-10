@@ -1,6 +1,14 @@
-// This fixed upstream retains CampusCare's existing database and private photos.
-// The browser uses its public Cloudflare origin and its own sign-in cookie.
-const UPSTREAM_ORIGIN='https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site';
+// The backend is the self-hosted CampusCare Worker named by the UPSTREAM_ORIGIN
+// variable (see hosting/cloudflare/README.md). Without it, the original Sites
+// backend stays the upstream. The browser keeps its public origin and cookie.
+const DEFAULT_UPSTREAM_ORIGIN='https://campuscare-facility-hub.sepia-pastime9v.chatgpt.site';
+
+// Only an exact https origin (no path, query or credentials) is accepted.
+function upstreamOrigin(env){
+ const value=typeof env?.UPSTREAM_ORIGIN==='string'?env.UPSTREAM_ORIGIN.trim():'';
+ if(!value)return DEFAULT_UPSTREAM_ORIGIN;
+ try{const url=new URL(value);return url.protocol==='https:'&&url.origin===value.replace(/\/$/,'')?url.origin:null;}catch{return null;}
+}
 
 const error=(status,message)=>Response.json({error:message},{status,headers:{'Cache-Control':'no-store'}});
 const homeVaryHeaders=new Set(['rsc','next-router-state-tree','next-router-prefetch','next-router-segment-prefetch','next-url','x-vinext-interception-context','x-vinext-mounted-slots','x-vinext-rsc-render-mode']);
@@ -12,13 +20,14 @@ function hasSafeHomeVary(request,headers){
  return vary.split(',').map(value=>value.trim().toLowerCase()).every(name=>homeVaryHeaders.has(name)&&!request.headers.has(name));
 }
 
-function stripOnlyUpstreamBotCookie(headers){
+function stripOnlyUpstreamBotCookie(headers,upstreamHost){
  if(!headers.has('Set-Cookie'))return true;
  // Do not cache or strip a CampusCare session or any cookie other than this
- // Cloudflare cookie, which is scoped to the upstream chatgpt.site host.
+ // Cloudflare cookie, which is scoped to the upstream host or a parent of it.
  if(typeof headers.getSetCookie!=='function')return false;
  const cookies=headers.getSetCookie();
- if(!cookies.length||!cookies.every(cookie=>/^__cf_bm=/i.test(cookie)&&/;\s*domain=\.?chatgpt\.site(?:;|$)/i.test(cookie)))return false;
+ const upstreamScoped=cookie=>{const domain=/;\s*domain=\.?([^;\s]+)\s*(?:;|$)/i.exec(cookie)?.[1]?.toLowerCase();return !!domain&&domain.includes('.')&&(upstreamHost===domain||upstreamHost.endsWith('.'+domain));};
+ if(!cookies.length||!cookies.every(cookie=>/^__cf_bm=/i.test(cookie)&&upstreamScoped(cookie)))return false;
  headers.delete('Set-Cookie');
  return true;
 }
@@ -33,6 +42,9 @@ const campusCareProxy={
   const publicURL=new URL(request.url),origin=request.headers.get('Origin');
   // Validate before rewriting: an arbitrary Origin must never gain same-origin access.
   if(origin&&origin!==publicURL.origin)return error(403,'This request must come from CampusCare.');
+  const UPSTREAM_ORIGIN=upstreamOrigin(env);
+  if(!UPSTREAM_ORIGIN)return error(500,'CampusCare is not configured correctly. Please contact the administrator.');
+  const upstreamHost=new URL(UPSTREAM_ORIGIN).hostname;
   const session=request.headers.get('Cookie')?.split(';').map(part=>part.trim()).find(part=>part.startsWith('__Host-campuscare-session='));
   // Only cache the unpersonalised browser navigation response, never an RSC,
   // prefetched, authenticated, queried, or API response.
@@ -70,13 +82,13 @@ const campusCareProxy={
     visible.pathname=redirect.pathname;visible.search=redirect.search;visible.hash=redirect.hash;
     headers.set('Location',visible.href);
    }
-   if(cacheHome&&response.status===200&&headers.get('Content-Type')?.toLowerCase().includes('text/html')&&hasSafeHomeVary(request,headers)&&stripOnlyUpstreamBotCookie(headers)){
+   if(cacheHome&&response.status===200&&headers.get('Content-Type')?.toLowerCase().includes('text/html')&&hasSafeHomeVary(request,headers)&&stripOnlyUpstreamBotCookie(headers,upstreamHost)){
     headers.set('Cache-Control','public, max-age=60');
     const home=new Response(response.body,{status:response.status,statusText:response.statusText,headers});
     try{ctx.waitUntil(caches.default.put(cacheKey,home.clone()).catch(()=>{}));}catch{}
     return home;
    }
-   if(cacheAsset&&response.status===200&&isPublicStaticAsset(headers)&&stripOnlyUpstreamBotCookie(headers)){
+   if(cacheAsset&&response.status===200&&isPublicStaticAsset(headers)&&stripOnlyUpstreamBotCookie(headers,upstreamHost)){
     headers.set('Cache-Control','public, max-age=31536000, immutable');
     const asset=new Response(response.body,{status:response.status,statusText:response.statusText,headers});
     try{ctx.waitUntil(caches.default.put(cacheKey,asset.clone()).catch(()=>{}));}catch{}
