@@ -1,5 +1,7 @@
 # CampusCare's free public address
 
+> **Backend target.** The proxy forwards to the origin in the `UPSTREAM_ORIGIN` environment variable, which should be the self-hosted Worker from [Self-hosting on Cloudflare](../cloudflare/README.md). When it's unset, the proxy falls back to the original Sites backend. A value that isn't an exact `https://` origin makes the proxy refuse requests. For the Worker fallback, add `"vars": {"UPSTREAM_ORIGIN": "https://…"}` to `wrangler.jsonc` before deploying.
+
 The current public entry address is **https://campuscare-dln.pages.dev**. See [Pages deployment](pages/README.md) for its upload and runtime settings. The original Worker below remains a fallback.
 
 This small Cloudflare Worker gives visitors a `workers.dev` website address. The existing public Site remains the backend, retaining its database, private photos, sender and eligibility checks. This is a new public entry point, not a migration of stored data to another account.

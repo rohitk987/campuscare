@@ -166,3 +166,46 @@ test(`${publicOrigin}: foreign 307 cannot replay an OTP body`,async()=>{
  assert.ok(!result.body.includes('004217'));
 });
 }
+
+// Self-hosted backend: the proxy is pointed at the owner's Worker by a variable.
+const selfHosted='https://campuscare-app.example-account.workers.dev';
+async function runWith(bindings,path,init,outbound){
+ const worker=new Miniflare({modules:true,compatibilityDate:pagesConfig.compatibility_date,compatibilityFlags:pagesConfig.compatibility_flags,script,bindings,outboundService:outbound});
+ try{const response=await worker.dispatchFetch('https://campuscare-dln.pages.dev'+path,{...init,redirect:'manual'});return {status:response.status,headers:response.headers,body:await response.text()};}
+ finally{await worker.dispose();}
+}
+
+test('UPSTREAM_ORIGIN redirects forwarding, Origin and redirects to the self-hosted Worker',async()=>{
+ const publicOrigin='https://campuscare-dln.pages.dev';
+ const post=await runWith({UPSTREAM_ORIGIN:selfHosted},'/api/access',{method:'POST',headers:{Origin:publicOrigin,'X-Campuscare-Request':'1'},body:'{}'},async request=>{
+  assert.equal(request.url,selfHosted+'/api/access');assert.equal(request.headers.get('Origin'),selfHosted);
+  return Response.json({ok:true});
+ });
+ assert.equal(post.status,200);
+ const redirect=await runWith({UPSTREAM_ORIGIN:selfHosted+'/'},'/r',{},async()=>new Response(null,{status:302,headers:{Location:selfHosted+'/next'}}));
+ assert.equal(redirect.headers.get('Location'),publicOrigin+'/next');
+ const foreign=await runWith({UPSTREAM_ORIGIN:selfHosted},'/r',{},async()=>new Response(null,{status:302,headers:{Location:upstream+'/next'}}));
+ assert.equal(foreign.status,502);
+});
+
+test('an invalid UPSTREAM_ORIGIN fails closed without forwarding',async()=>{
+ for(const value of ['http://campuscare-app.example.workers.dev','https://campuscare-app.example.workers.dev/path','https://user:pass@campuscare-app.example.workers.dev','not a url']){
+  let calls=0;
+  const result=await runWith({UPSTREAM_ORIGIN:value},'/',{},async()=>{calls++;return new Response('unexpected');});
+  assert.equal(result.status,500);assert.equal(calls,0);
+ }
+});
+
+test('the bot cookie of a self-hosted workers.dev upstream does not block asset caching',async()=>{
+ let calls=0;const path='/_next/static/chunks/campuscare-Self1234.js';
+ const fetchAsset=async(domain)=>runWith({UPSTREAM_ORIGIN:selfHosted},path,{method:'GET'},async()=>{
+  calls++;const headers=new Headers({'Content-Type':'text/javascript'});
+  headers.append('Set-Cookie',`__cf_bm=upstream-only; Path=/; Domain=${domain}; Secure; HttpOnly`);
+  return new Response('asset',{headers});
+ });
+ const scoped=await fetchAsset('campuscare-app.example-account.workers.dev');
+ assert.equal(scoped.headers.get('Cache-Control'),'public, max-age=31536000, immutable');assert.equal(scoped.headers.get('Set-Cookie'),null);
+ const unrelated=await fetchAsset('pages.dev');
+ assert.equal(unrelated.headers.get('Cache-Control'),'no-store');
+ assert.equal(calls,2);
+});

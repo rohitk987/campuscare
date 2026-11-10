@@ -46,3 +46,6 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Local Wrangler secrets for npm run dev
+.dev.vars*

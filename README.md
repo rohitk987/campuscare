@@ -36,7 +36,9 @@ The shared login page can be opened by link; complaints, evidence and administra
 
 The initial administrator's official email is configured through the hosted secret `BMSIT_ADMIN_EMAIL`. It is never supplied by the browser. The first ordinary visitor never becomes administrator. Other approved current students become reporters after OTP verification; pre-approved staff invitations retain their assigned roles. Existing inactive or already-claimed invitations cannot be reclaimed.
 
-The public address uses a small Cloudflare Pages Function that forwards to the existing Site backend, retaining the database, photos and sender. The visible website address no longer contains `chatgpt.site`, the Cloudflare account name or `workers`; the original backend must remain online. See [Pages address setup](hosting/free-address/pages/README.md). Users sign in once on the new hostname because session cookies are host-bound.
+**Hosting:** the app now deploys to the owner's own Cloudflare account with `npm run deploy`, replacing the OpenAI Sites host. See [Self-hosting on Cloudflare](hosting/cloudflare/README.md).
+
+The public address uses a small Cloudflare Pages Function that forwards to the backend named by its `UPSTREAM_ORIGIN` variable (the self-hosted Worker), or to the original Site backend when that variable is unset. The visible website address no longer contains `chatgpt.site`, the Cloudflare account name or `workers`; the original backend must remain online. See [Pages address setup](hosting/free-address/pages/README.md). Users sign in once on the new hostname because session cookies are host-bound.
 
 ## First use
 

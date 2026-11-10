@@ -6,6 +6,10 @@ Cloudflare assigned this hostname to the `campuscare` Pages project because the 
 
 `prepare.mjs` copies the reviewed sibling `worker.mjs` into `dist/_worker.js` and generates `_routes.json` for all paths. The upload contains no Gmail credentials, application records or photos. The proxy keeps exactly the same Origin, cookie, destination, redirect and cache checks as the original Worker.
 
+## Backend target
+
+Set a Production variable `UPSTREAM_ORIGIN` on the Pages project (Settings → Variables and secrets) to the self-hosted Worker's origin, for example `https://campuscare-app.<subdomain>.workers.dev`, then publish a new deployment. Without it, the proxy still forwards to the original Sites backend. See [Self-hosting on Cloudflare](../../cloudflare/README.md).
+
 ## Rebuild and publish
 
 1. Run `node hosting/free-address/pages/prepare.mjs` from the repository root.
