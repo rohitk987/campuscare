@@ -1,0 +1,66 @@
+[
+ {
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "ink",
+  "genre": "editorial",
+  "axes": "light/grotesk-sans/chromatic-blue",
+  "hero": "none (app screens)",
+  "nav": "sidebar as a list of words, ink rule on the current page",
+  "footer": "one line: product and organisation",
+  "imagery": "none; the product itself",
+  "photos": [],
+  "entry": "overview headline is the live count waiting for review",
+  "fingerprint": "app/ledger/ruled-rows/text-actions/no-cards/one-accent",
+  "sections": [
+   "overview: count headline, queue, recent ledger, categories"
+  ],
+  "signature": "the desk opens on how many complaints wait for review",
+  "waived": [
+   "22",
+   "28b",
+   "72"
+  ],
+  "prompt": "the dashboard home still looks generated, mostly its buttons",
+  "date": "2026-11-11"
+ },
+ {
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "ink",
+  "genre": "editorial",
+  "axes": "light/grotesk-sans/chromatic-blue",
+  "hero": "none (app screens)",
+  "nav": "the project sidebar and breadcrumb bar, kept",
+  "footer": "one line: product and organisation",
+  "imagery": "none; the product itself",
+  "photos": [],
+  "entry": "sign-in split: form beside the college contacts",
+  "fingerprint": "app/ledger/ruled-rows/side-figures/no-cards/one-accent",
+  "sections": [
+   "sign-in",
+   "overview",
+   "complaints",
+   "verification",
+   "locations",
+   "people",
+   "student access",
+   "reports",
+   "settings",
+   "ticket sheet",
+   "report dialog"
+  ],
+  "signature": "the complaints ledger, ruled rows with one state tag each",
+  "waived": [
+   "22",
+   "28b",
+   "72"
+  ],
+  "prompt": "a maintenance desk for one college campus: students report a facility fault with a photo, staff verify, assign and repair it from a queue",
+  "date": "2026-11-10"
+ }
+]

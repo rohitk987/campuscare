@@ -1,0 +1,14 @@
+{
+  "scanned": "2026-11-10",
+  "findings": {
+    "fonts": "Inter, Segoe UI, Arial, sans-serif declared in app/globals.css L5-6 but never loaded (no @font-face, no font link); Windows renders Segoe UI",
+    "palette": "shadcn hex tokens at :root (app/globals.css L4): primary #305bea, sidebar navy #111e34; ~140 literal colours inside rules (globals.css L6, product.css L1); org accent colour written into --primary at runtime (app/campuscare.tsx L43)",
+    "brand": "#305bea blue and the building mark (public/favicon.svg, .brandmark); wordmark CampusCare",
+    "motion": "tw-animate-css and vendored shadcn transitions (components/ui, never edited); one spin keyframe (.loader)",
+    "spacing": "Tailwind 4 defaults; custom CSS off the 4px scale (17/19/23px)",
+    "framework": "Vinext 1.0.0-beta.5 (Next 16 app router), Tailwind 4, shadcn new-york vendored in components/ui",
+    "product": "runs locally at http://127.0.0.1:5173 (.dev.vars with local test values); the workspace sits behind OTP sign-in and was captured from the owner's signed-in Chrome"
+  },
+  "preserve": ["brand blue #305bea and the building mark", "--primary runtime override from org settings", "shadcn component set and token names", "every link, field, handler and route"],
+  "introduce": ["tokens.css and base.css", "fixed app type scale", "the Floor: no eyebrows, no tracked caps, no literal colours", "control states", "recomposed screens"]
+}

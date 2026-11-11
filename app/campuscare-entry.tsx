@@ -1,7 +1,6 @@
 'use client';
 
 import {lazy, Suspense, useEffect, useState} from 'react';
-import {Building2} from 'lucide-react';
 import {Busy} from './ui';
 import VerificationPanel from './signin-panel';
 import {accessStatus, type AccessStatus} from './access-client';
@@ -9,7 +8,7 @@ import {accessStatus, type AccessStatus} from './access-client';
 const CampusCare = lazy(() => import('./campuscare'));
 
 function WorkspaceLoading() {
- return <main className="loading-page"><span className="brandmark"><Building2/></span><h2>Opening your workspace</h2><Busy/></main>;
+ return <main className="loading-page"><span className="brand">CampusCare</span><h2>Opening your workspace</h2><Busy/></main>;
 }
 
 export default function CampusCareEntry() {
