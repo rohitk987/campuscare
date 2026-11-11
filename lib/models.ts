@@ -84,6 +84,10 @@ export interface Complaint {
   site: string;
   own?: boolean;
   can_view_evidence?: boolean;
+  assignee_name?: string | null;
+  priority_score?: number;
+  priority_band?: 'Critical' | 'High' | 'Medium' | 'Low';
+  has_photo?: boolean;
 }
 
 export interface Notification {
@@ -199,7 +203,20 @@ export interface ComplaintDetail {
   events: DetailEvent[];
   evidence: ComplaintEvidence | null;
   own: boolean;
+  /** Reviewers only: the algorithms' reading of this complaint. */
+  analysis?: TicketAnalysis | null;
 }
+
+export interface TicketAnalysis {
+  priority: import('./algorithms').PriorityResult;
+  credibility: import('./algorithms').Credibility;
+  duplicates: (import('./algorithms').DuplicateMatch & { ticketNo: string; title: string; status: string })[];
+  reuse: { id: string; ticketNo: string; distance: number }[];
+  suggestion: import('./algorithms').AssignmentSuggestion | null;
+  photoHash: string | null;
+}
+
+export type WorkspaceInsights = ReturnType<typeof import('./insights').workspaceInsights>;
 
 export interface ReportSessionResponse {
   sessionId: string;

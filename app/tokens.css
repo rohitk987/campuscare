@@ -33,6 +33,28 @@
   --color-signal-soft-ink: color-mix(in oklab, var(--primary) 50%, var(--color-ink));
   --color-focus: var(--primary);
   --color-scrim: oklch(16% 0 0 / 0.45);
+  /* Data colours: the dataviz skill's validated reference palette, light mode, in fixed order.
+     Categorical slots follow the domain's category order; "Other" takes the neutral slot 0. */
+  --color-category-0: #898781;
+  --color-category-1: #2a78d6;
+  --color-category-2: #eb6834;
+  --color-category-3: #1baf7a;
+  --color-category-4: #eda100;
+  --color-category-5: #e87ba4;
+  --color-category-6: #008300;
+  --color-category-7: #6250d6;
+  --color-category-8: #e34948;
+  /* Status colours are reserved for state and always ship with a text label. */
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+  --color-status-active: #2a78d6;
+  --color-status-idle: #898781;
+  --color-status-void: #c3c2b7;
+  --color-chart-grid: #e1e0d9;
+  --color-chart-axis: #c3c2b7;
+  --color-on-fill: #ffffff;
   --font-display: "Epilogue", ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-display);
   --radius-card: 12px;
@@ -117,7 +139,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--color-ink);
+  --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);

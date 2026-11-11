@@ -1,0 +1,1 @@
+ALTER TABLE `report_sessions` ADD `photo_hash` text;

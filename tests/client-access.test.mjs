@@ -34,16 +34,17 @@ const iconNames=source.match(/import \{([^}]+)\} from 'lucide-react'/)[1].split(
 const uiNames=['Sidebar','SidebarContent','SidebarFooter','SidebarHeader','SidebarInset','SidebarMenu','SidebarMenuButton','SidebarMenuItem','SidebarProvider','SidebarTrigger','Button','Input','Table','TableBody','TableCell','TableHead','TableHeader','TableRow','DropdownMenu','DropdownMenuTrigger','DropdownMenuContent','DropdownMenuItem','DropdownMenuSeparator','DropdownMenuLabel','Tabs','TabsList','TabsTrigger','Dialog','DialogContent','DialogHeader','DialogTitle','DialogDescription','AlertDialog','AlertDialogContent','AlertDialogHeader','AlertDialogTitle','AlertDialogDescription','AlertDialogFooter','AlertDialogCancel','AlertDialogAction','Toaster','Picker','Field','Empty','Busy','VerificationPanel','StudentAccessPanel'];
 const placeholders=names=>names.map(name=>`export function ${name}(){return null;}`).join('\n');
 const bundle=await build({entryPoints:['app/campuscare.tsx'],bundle:true,write:false,format:'esm',platform:'node',jsx:'automatic',plugins:[{name:'client-test-boundaries',setup(plugin){
- plugin.onResolve({filter:/^(react(?:\/jsx-runtime)?|lucide-react|sonner|@\/components\/ui\/.*|\.\/ui|\.\/access-panel|\.\/signin-panel|\.\/access-client|\.\/admin-dialog|\.\/report-dialog|\.\/ticket-sheet)$/},args=>({path:args.path,namespace:'client-boundary'}));
+ plugin.onResolve({filter:/^(react(?:\/jsx-runtime)?|lucide-react|sonner|next\/image|@\/components\/ui\/.*|\.\/ui|\.\/access-panel|\.\/signin-panel|\.\/access-client|\.\/admin-dialog|\.\/report-dialog|\.\/ticket-sheet|\.\/insights-panel)$/},args=>({path:args.path,namespace:'client-boundary'}));
  plugin.onLoad({filter:/.*/,namespace:'client-boundary'},args=>{
   if(args.path==='react')return {contents:"export const {useState,useEffect,useRef,useCallback,useMemo}=globalThis.__campuscareClientTest;"};
   if(args.path==='react/jsx-runtime')return {contents:"export const jsx=(type,props)=>({type,props});export const jsxs=jsx;export const Fragment='fragment';"};
   if(args.path==='lucide-react')return {contents:placeholders(iconNames)};
-  if(args.path==='./ui')return {contents:placeholders(['Picker','Field','Empty','Busy'])+"\nexport const {api,read}=globalThis.__campuscareClientTest;export const initials=()=>'';export const ago=()=>'';"};
+  if(args.path==='next/image')return {contents:"export default function Image(){return null;}"};
+  if(args.path==='./ui')return {contents:placeholders(['Picker','Field','Empty','Busy','CategoryChip','PriorityBadge','Avatar','Meter'])+"\nexport const {api,read}=globalThis.__campuscareClientTest;export const initials=()=>'';export const ago=()=>'';"};
   if(args.path==='./access-panel')return {contents:placeholders(['VerificationPanel','StudentAccessPanel'])+"\nexport const {accessStatus}=globalThis.__campuscareClientTest;export const signOut=async()=>{};"};
   if(args.path==='./signin-panel')return {contents:"export default function VerificationPanel(){return null;}"};
   if(args.path==='./access-client')return {contents:"export const {accessStatus}=globalThis.__campuscareClientTest;export const signOut=async()=>{};"};
-  if(['./admin-dialog','./report-dialog','./ticket-sheet'].includes(args.path)){const name={'./admin-dialog':'AdminDialog','./report-dialog':'ReportDialog','./ticket-sheet':'TicketSheet'}[args.path];return {contents:`export default function ${name}(){return null;}`};}
+  if(['./admin-dialog','./report-dialog','./ticket-sheet','./insights-panel'].includes(args.path)){const name={'./admin-dialog':'AdminDialog','./report-dialog':'ReportDialog','./ticket-sheet':'TicketSheet','./insights-panel':'InsightsPanel'}[args.path];return {contents:`export default function ${name}(){return null;}`};}
   return {contents:placeholders(uiNames)+"\nexport const toast={success(){},error(){}};"};
  });
 }}]});

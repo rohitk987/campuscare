@@ -3,6 +3,8 @@ import {all,one,stmt,db,bucket,uid,identity,membership,initialisePilot,admin,sit
 import {categories,checkPosition,buildingCandidates,withinScope,transition} from '@/lib/domain';
 import {PILOT_ORG_ID,PILOT_ORG_NAME,PILOT_DOMAINS,PILOT_ACCESS_MESSAGE,isPilotEmail,normaliseEmail} from '@/lib/pilot';
 import {visibleComplaints} from '@/lib/complaints';
+import {isPhotoHash} from '@/lib/algorithms';
+import {analyseWorkspace,ticketInsight,workspaceInsights} from '@/lib/insights';
 import type {CampusUser} from '@/lib/account';
 import type {Building,Complaint,DetailEvent,Location,Member,Notification,Organisation,Site} from '@/lib/models';
 import type {Position} from '@/lib/domain';
@@ -16,6 +18,15 @@ function parse<S extends z.ZodTypeAny>(schema:S,value:unknown):z.output<S>{const
 async function siteFor(orgId:string,siteId:string,member:Member){siteAccess(member,siteId);const site=await one<Site>('SELECT * FROM sites WHERE id=? AND org_id=?',siteId,orgId);if(!site)throw new HttpError(404,'Site not found.');return site;}
 async function locationFor(orgId:string,locationId:string,siteId?:string){const location=await one<ReportLocation>('SELECT l.*,b.site_id,b.latitude,b.longitude,b.radius,b.name building FROM locations l JOIN buildings b ON b.id=l.building_id AND b.org_id=l.org_id WHERE l.id=? AND l.org_id=?',locationId,orgId);if(!location||siteId&&location.site_id!==siteId)throw new HttpError(400,'Select a valid room or area within this site.');return location;}
 async function check(orgId:string,member:Member,siteId:string,p:Position){const site=await siteFor(orgId,siteId,member);const org=await one<Pick<Organisation,'max_accuracy'>>('SELECT max_accuracy FROM organisations WHERE id=?',orgId);if(!org)throw new HttpError(404,'Organisation not found.');try{checkPosition(p,site,org.max_accuracy);}catch(e){throw new HttpError(422,(e as Error).message);}const buildings=await all<Building>('SELECT * FROM buildings WHERE org_id=? AND site_id=?',orgId,siteId);return buildingCandidates(p,buildings);}
+/** The sites, buildings and complaints this member may see, authorised before reading. */
+async function scoped(orgId:string,member:Member,user:CampusUser){
+ const sites=(await all<Site>('SELECT * FROM sites WHERE org_id=?',orgId)).filter(s=>withinScope(member,s.id));const siteIds=new Set(sites.map(s=>s.id));
+ const buildings=(await all<Building>('SELECT * FROM buildings WHERE org_id=?',orgId)).filter(b=>siteIds.has(b.site_id));
+ const rows=await visibleComplaints(orgId,{userId:user.userId,role:member.role,memberId:member.id,siteIds:[...siteIds]});
+ const org=await one<Pick<Organisation,'response_hours'>>('SELECT response_hours FROM organisations WHERE id=?',orgId);
+ return {sites,buildings,rows,org:org||{response_hours:24}};
+}
+const reviewer=(m:Member)=>['admin','verifier'].includes(m.role);
 function redact(t:Complaint,user:CampusUser,m:Member){const full=t.reporter_id===user.userId||['admin','verifier'].includes(m.role)||(m.role==='technician'&&t.assignee_id===m.id);return {...t,reporter_name:full?t.reporter_name:'Community member',reporter_id:full?t.reporter_id:undefined,description:full?t.description:'Shared facility issue. Detailed evidence is available to the reporter and authorised staff.',can_view_evidence:full,own:t.reporter_id===user.userId};}
 export async function GET(request:Request){try{
  const url=new URL(request.url),op=url.searchParams.get('op')||'bootstrap';const user=await identity();
@@ -27,10 +38,11 @@ export async function GET(request:Request){try{
  }
  const orgId=url.searchParams.get('org')||'',{member}=await membership(orgId);
  if(op==='workspace'){
-  const sites=(await all<Site>('SELECT * FROM sites WHERE org_id=?',orgId)).filter(s=>withinScope(member,s.id));const siteIds=new Set(sites.map(s=>s.id));
-  const buildings=(await all<Building>('SELECT * FROM buildings WHERE org_id=?',orgId)).filter(b=>siteIds.has(b.site_id));const buildingIds=new Set(buildings.map(b=>b.id));
+  const {sites,buildings,rows,org}=await scoped(orgId,member,user);const buildingIds=new Set(buildings.map(b=>b.id));
   const locations=(await all<Location>('SELECT * FROM locations WHERE org_id=?',orgId)).filter(l=>buildingIds.has(l.building_id));
-  const tickets=(await visibleComplaints(orgId,{userId:user.userId,role:member.role,memberId:member.id,siteIds:[...siteIds]})).map(t=>redact(t,user,member));
+  // Scores use the full record; only the score, its band and photo availability leave the server here.
+  const analysis=await analyseWorkspace(orgId,org,rows,buildings,[]);
+  const tickets=rows.map(t=>{const r=redact(t,user,member),a=analysis.tickets[t.id];return {...r,priority_score:a.priority.score,priority_band:a.priority.band,has_photo:!!r.can_view_evidence&&a.hasPhoto};});
   const members=member.role==='admin'?await all<Member>('SELECT id,org_id,name,email,role,site_scope,active,user_id FROM members WHERE org_id=? ORDER BY name',orgId):[];
   const notifications=await all<Notification>('SELECT * FROM notifications WHERE org_id=? AND user_id=? ORDER BY created_at DESC LIMIT 30',orgId,user.userId);
   const following=(await all<{complaint_id:string}>('SELECT complaint_id FROM followers WHERE org_id=? AND user_id=?',orgId,user.userId)).map(f=>f.complaint_id);
@@ -39,7 +51,15 @@ export async function GET(request:Request){try{
  if(op==='detail'){
   const {t,full,own}=await ticketAccess(orgId,url.searchParams.get('id')||'');const events=full?await all<DetailEvent>('SELECT * FROM events WHERE org_id=? AND complaint_id=? ORDER BY created_at',orgId,t.id):[];
   const evidence=full&&t.session_id?await one<EvidenceRow>('SELECT latitude,longitude,accuracy,captured_at,received_at,image_key FROM report_sessions WHERE id=? AND org_id=?',t.session_id,orgId):null;
-  if(evidence){evidence.available=!!evidence.image_key;delete evidence.image_key;}return json({ticket:redact(t,user,member),events:events.map(e=>t.demo&&e.action==='sample'?{...e,actor:'CampusCare demo'}:e),evidence,own});
+  if(evidence){evidence.available=!!evidence.image_key;delete evidence.image_key;}
+  let analysis=null;
+  if(reviewer(member)){const s=await scoped(orgId,member,user);const members=await all<Member>('SELECT id,org_id,name,email,role,site_scope,active,user_id FROM members WHERE org_id=?',orgId);analysis=ticketInsight(await analyseWorkspace(orgId,s.org,s.rows,s.buildings,members),t.id);}
+  return json({ticket:redact(t,user,member),events:events.map(e=>t.demo&&e.action==='sample'?{...e,actor:'CampusCare demo'}:e),evidence,own,analysis});
+ }
+ if(op==='insights'){
+  if(!reviewer(member))throw new HttpError(403,'Insights are available to verifiers and administrators.');
+  const s=await scoped(orgId,member,user);const members=await all<Member>('SELECT id,org_id,name,email,role,site_scope,active,user_id FROM members WHERE org_id=?',orgId);
+  return json(workspaceInsights(await analyseWorkspace(orgId,s.org,s.rows,s.buildings,members),s.rows));
  }
  if(op==='photo'){
   const {t,full}=await ticketAccess(orgId,url.searchParams.get('id')||'');if(!full)throw new HttpError(403,'You cannot access this evidence.');const s=await one<{image_key:string|null}>('SELECT image_key FROM report_sessions WHERE id=? AND org_id=?',t.session_id||'',orgId);if(!s?.image_key)throw new HttpError(404,'No photo is attached.');const object=await bucket().get(s.image_key);if(!object)throw new HttpError(404,'Photo unavailable.');return new Response(object.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'"}});
@@ -54,8 +74,10 @@ export async function POST(request:Request){try{
   const s=await one<ReportSessionRow>('SELECT * FROM report_sessions WHERE id=? AND org_id=? AND user_id=?',sessionId,orgId,user.userId);if(!s||s.consumed||s.expires_at<Date.now())throw new HttpError(409,'Your reporting session expired. Start a new report.');
   let raw;try{raw=JSON.parse(String(form.get('position')));}catch{throw new HttpError(400,'Invalid location data.');}const p=parse(position,raw),candidates=await check(orgId,member,s.site_id,p);const l=await locationFor(orgId,locationId,s.site_id);if(!candidates.some(b=>b.id===l.building_id))throw new HttpError(422,'This photo location does not support the selected building. Recheck your location.');
   const file=form.get('photo');if(!(file instanceof File)||file.size<100||file.size>5*1024*1024)throw new HttpError(400,'Capture a JPEG photo smaller than 5 MB.');const bytes=new Uint8Array(await file.arrayBuffer());if(bytes[0]!==255||bytes[1]!==216||bytes[2]!==255||bytes[bytes.length-2]!==255||bytes[bytes.length-1]!==217)throw new HttpError(400,'The captured photo is not a valid JPEG.');
+  // The browser's 64-bit dHash is advisory evidence for duplicate and reuse checks; anything malformed is dropped.
+  const photoHash=String(form.get('photoHash')||''),hash=isPhotoHash(photoHash)?photoHash:null;
   const key=`${orgId}/${sessionId}/${uid()}.jpg`,now=Date.now();await bucket().put(key,bytes,{httpMetadata:{contentType:'image/jpeg'}});
-  const result=await stmt('UPDATE report_sessions SET image_key=?,location_id=?,latitude=?,longitude=?,accuracy=?,captured_at=?,received_at=? WHERE id=? AND org_id=? AND user_id=? AND consumed=0 AND expires_at>?',key,locationId,p.latitude,p.longitude,p.accuracy,p.timestamp,now,sessionId,orgId,user.userId,now).run();if(!result.meta.changes){await bucket().delete(key);throw new HttpError(409,'Capture session is no longer available.');}if(s.image_key)await bucket().delete(s.image_key);
+  const result=await stmt('UPDATE report_sessions SET image_key=?,location_id=?,latitude=?,longitude=?,accuracy=?,captured_at=?,received_at=?,photo_hash=? WHERE id=? AND org_id=? AND user_id=? AND consumed=0 AND expires_at>?',key,locationId,p.latitude,p.longitude,p.accuracy,p.timestamp,now,hash,sessionId,orgId,user.userId,now).run();if(!result.meta.changes){await bucket().delete(key);throw new HttpError(409,'Capture session is no longer available.');}if(s.image_key)await bucket().delete(s.image_key);
   return json({saved:true,receivedAt:now,accuracy:p.accuracy});
  }
  let body:unknown;try{body=await request.json();}catch{throw new HttpError(400,'Invalid request data.');}const data=parse(z.object({action:z.string().min(1).max(100)}).passthrough(),body),action=data.action;

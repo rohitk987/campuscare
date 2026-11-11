@@ -71,7 +71,7 @@ async function bundleRoute(entry){
 }
 const campus=await bundleRoute('app/api/campuscare/route.ts');
 const access=await bundleRoute('app/api/access/route.ts');
-const migrations=await Promise.all(['0000_flaky_talisman.sql','0001_rare_wind_dancer.sql'].map(file=>readFile(new URL('../drizzle/'+file,import.meta.url),'utf8')));
+const migrations=await Promise.all(['0000_flaky_talisman.sql','0001_rare_wind_dancer.sql','0002_overconfident_franklin_storm.sql'].map(file=>readFile(new URL('../drizzle/'+file,import.meta.url),'utf8')));
 const user=(email,id=email)=>({userId:id,email,displayName:'Test member',fullName:'Test member'});
 const get=query=>campus.GET(new Request('https://campus.test/api/campuscare?'+query));
 const accessGet=(op='status')=>access.GET(new Request('https://campus.test/api/access?op='+op));
@@ -434,8 +434,9 @@ async function startReport(changes={}){
  const response=await post('start_report',{orgId:PILOT_ORG_ID,siteId:'mapped',position:reportPosition(),...changes});
  assert.equal(response.status,200,await response.clone().text());return response.json();
 }
-async function captureReport(sessionId,{locationId='room-mapped',position=reportPosition(),bytes=reportJpeg}={}){
+async function captureReport(sessionId,{locationId='room-mapped',position=reportPosition(),bytes=reportJpeg,photoHash}={}){
  const data=new FormData();for(const [key,value] of Object.entries({orgId:PILOT_ORG_ID,sessionId,locationId,position:JSON.stringify(position)}))data.set(key,value);
+ if(photoHash!==undefined)data.set('photoHash',photoHash);
  data.set('photo',new Blob([bytes],{type:'image/jpeg'}),'capture.jpg');
  return campus.POST(new Request('https://campus.test/api/campuscare?op=photo',{method:'POST',headers:{'X-Campuscare-Request':'1','Origin':'https://campus.test'},body:data}));
 }
@@ -522,4 +523,27 @@ test('verified reporter, admin and assigned technician complete repair and revie
  const ticket=row('SELECT * FROM complaints WHERE id=?',id);assert.equal(ticket.status,'assigned');assert.equal(ticket.reopen,'none');assert.equal(ticket.resolved_at,null);
  assert.equal(row('SELECT COUNT(*) n FROM complaints').n,1);assert.equal(row('SELECT COUNT(*) n FROM events WHERE complaint_id=?',id).n,10);
  assert.equal(row('SELECT COUNT(*) n FROM notifications WHERE user_id=?',reporter).n,9);
+});
+
+test('photo fingerprints are stored only when they are a well-formed 64-bit dHash',async()=>{
+ await reportAsStudent();
+ const first=await startReport();assert.equal((await captureReport(first.sessionId,{photoHash:'00ff00ff00ff00ff'})).status,200);
+ assert.equal(row('SELECT photo_hash FROM report_sessions WHERE id=?',first.sessionId).photo_hash,'00ff00ff00ff00ff');
+ const second=await startReport();assert.equal((await captureReport(second.sessionId,{photoHash:"00ff' OR 1=1 --"})).status,200);
+ assert.equal(row('SELECT photo_hash FROM report_sessions WHERE id=?',second.sessionId).photo_hash,null);
+});
+test('insights and per-complaint analysis are limited to verifiers and administrators',async()=>{
+ await reportAsStudent();const {sessionId}=await startReport();
+ assert.equal((await captureReport(sessionId,{photoHash:'00ff00ff00ff00ff'})).status,200);assert.equal((await submitReport(sessionId)).status,200);
+ const id=row('SELECT id FROM complaints').id;
+ assert.equal((await get(`op=insights&org=${PILOT_ORG_ID}`)).status,403);
+ const own=await (await get(`op=detail&org=${PILOT_ORG_ID}&id=${id}`)).json();assert.equal(own.analysis,null);
+ const listed=(await (await get(`op=workspace&org=${PILOT_ORG_ID}`)).json()).tickets.find(t=>t.id===id);
+ assert.equal(typeof listed.priority_score,'number');assert.ok(['Critical','High','Medium','Low'].includes(listed.priority_band));
+ assert.equal('factors' in listed,false);assert.equal('photoHash' in listed,false);
+ await signIn(ADMIN);
+ const insights=await (await get(`op=insights&org=${PILOT_ORG_ID}`)).json();
+ assert.ok(insights.tickets.some(t=>t.id===id));assert.ok(Array.isArray(insights.hotspots));assert.ok(Array.isArray(insights.assignments.suggestions));
+ const detail=await (await get(`op=detail&org=${PILOT_ORG_ID}&id=${id}`)).json();
+ assert.equal(detail.analysis.photoHash,'00ff00ff00ff00ff');assert.equal(typeof detail.analysis.priority.score,'number');assert.ok(detail.analysis.priority.factors.length>0);
 });
