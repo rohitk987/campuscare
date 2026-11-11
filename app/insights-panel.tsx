@@ -93,7 +93,7 @@ function DuplicateLab({data,onOpen}:LabProps){
  return <div className="lab lab-split">
   <aside className="lab-side">
    <h3>Duplicate score</h3>
-   <p className="body-copy">S = c · place · time · (0.4 + 0.6 × wording). Place is 1 in the same room and falls off over 25 m; time halves in about a week. A near-identical photo closes a quarter of the remaining gap. c = 0.75 when categories differ.</p>
+   <p className="body-copy">S = c × place × time × (0.4 + 0.6 × wording). Place is 1 in the same room and falls off over 25 m; time halves in about a week. A near-identical photo closes a quarter of the remaining gap. c = 0.75 when categories differ.</p>
    <Slider label="Match threshold" value={threshold} min={0.1} max={0.9} step={0.05} onChange={setThreshold} format={pct}/>
    <dl className="lab-facts"><div><dt>Score pairs</dt><dd>{pairs.length}</dd></div><div><dt>Same-room rule pairs</dt><dd>{rule.size}</dd></div><div><dt>Found by both</dt><dd>{agree}</dd></div></dl>
    <p className="footnote">The rule is what most civic systems use: same room and category within 7 days. The score also catches reworded reports from the next room or under another category, and ranks same-room reports about different faults lower.</p>
@@ -114,7 +114,7 @@ function AssignmentLab({data,onOpen}:LabProps){
  return <div className="lab lab-split">
   <aside className="lab-side">
    <h3>Optimal assignment</h3>
-   <p className="body-copy">Each technician becomes {capacity} slots. A slot costs wL · load + wS · (1 − category match). The Hungarian algorithm picks the cheapest one-to-one plan in O(n³).</p>
+   <p className="body-copy">Each technician becomes {capacity} slots. A slot costs wL × load + wS × (1 − category match). The Hungarian algorithm picks the cheapest one-to-one plan in O(n³).</p>
    <Slider label="Jobs per technician" value={capacity} min={1} max={5} step={1} onChange={setCapacity}/>
    <Slider label="Workload weight wL" value={loadWeight} min={0} max={1} step={0.05} onChange={setLoadWeight} format={v=>`${v.toFixed(2)} (skill ${(1-v).toFixed(2)})`}/>
    <dl className="lab-facts"><div><dt>Waiting jobs</dt><dd>{data.jobs.length}</dd></div><div><dt>Technicians</dt><dd>{data.technicians.length}</dd></div><div><dt>Total cost</dt><dd>{plan.total.toFixed(2)}</dd></div></dl>

@@ -1,4 +1,5 @@
 @theme static {
+  /* App scale: 1.2 from a 16px body, fixed (no fluid heads on app screens). */
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-md: 1rem;
@@ -11,67 +12,81 @@
   --text-section: 1.2rem;
   --text-title: 1rem;
   --text-lead: 1rem;
-  --text-front: 3rem;
-  --text-desk: 2.5rem;
-  --font-weight-medium: 600;
+  --text-front: 2.986rem;
+  --text-desk: 2.488rem;
+  --text-reading: 3.583rem;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 500;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --color-error: oklch(52% 0.19 27);
-  --color-success: oklch(50% 0.12 150);
-  --color-paper: oklch(99.5% 0.003 100);
-  --color-paper-2: oklch(97% 0.004 100);
-  --color-paper-3: oklch(94% 0.006 100);
-  --color-ink: oklch(16% 0 0);
-  --color-ink-2: oklch(28% 0 0);
-  --color-ink-3: oklch(44% 0 0);
-  --color-rule: oklch(89% 0.004 100);
-  --color-rule-2: oklch(93.5% 0.003 100);
-  --color-signal: var(--primary);
-  --color-signal-ink: var(--color-paper);
-  --color-signal-soft: color-mix(in oklab, var(--primary) 12%, var(--color-paper));
-  --color-signal-soft-ink: color-mix(in oklab, var(--primary) 50%, var(--color-ink));
-  --color-focus: var(--primary);
-  --color-scrim: oklch(16% 0 0 / 0.45);
-  /* Data colours: the dataviz skill's validated reference palette, light mode, in fixed order.
-     Categorical slots follow the domain's category order; "Other" takes the neutral slot 0. */
-  --color-category-0: #898781;
-  --color-category-1: #2a78d6;
-  --color-category-2: #eb6834;
-  --color-category-3: #1baf7a;
-  --color-category-4: #eda100;
-  --color-category-5: #e87ba4;
-  --color-category-6: #008300;
-  --color-category-7: #6250d6;
-  --color-category-8: #e34948;
-  /* Status colours are reserved for state and always ship with a text label. */
-  --color-status-good: #0ca30c;
-  --color-status-warning: #fab219;
-  --color-status-serious: #ec835a;
-  --color-status-critical: #d03b3b;
-  --color-status-active: #2a78d6;
-  --color-status-idle: #898781;
-  --color-status-void: #c3c2b7;
-  --color-chart-grid: #e1e0d9;
-  --color-chart-axis: #c3c2b7;
-  --color-on-fill: #ffffff;
-  --font-display: "Epilogue", ui-sans-serif, system-ui, sans-serif;
+  /* Console, graphite: three ground steps, pale ink, hairlines cut from one surface. */
+  --color-paper: oklch(17% 0.008 250);
+  --color-paper-2: oklch(21% 0.009 250);
+  --color-paper-3: oklch(13.5% 0.007 250);
+  --color-hover: oklch(25% 0.01 250);
+  --color-ink: oklch(95% 0.005 250);
+  --color-ink-2: oklch(83% 0.008 250);
+  --color-ink-3: oklch(71% 0.01 250);
+  --color-rule: oklch(31% 0.01 250);
+  --color-rule-2: oklch(42% 0.012 250);
+  /* A field edge clears 3:1 against every ground step. */
+  --color-edge: oklch(57% 0.012 250);
+  /* Two meanings. Amber is a person: an operator, the current step, the one primary control.
+     Cool is an instrument: a reading, a time, an id, a score the system computed. */
+  --color-signal: oklch(82% 0.15 80);
+  --color-signal-ink: oklch(18% 0.04 75);
+  --color-signal-soft: oklch(29% 0.05 80);
+  --color-cool: oklch(77% 0.12 245);
+  --color-cool-soft: oklch(29% 0.05 245);
+  /* Ok and bad exist for status and diffs only. */
+  --color-ok: oklch(76% 0.15 150);
+  --color-ok-soft: oklch(24.5% 0.03 150);
+  --color-bad: oklch(70% 0.17 25);
+  --color-bad-soft: oklch(24.5% 0.035 25);
+  --color-error: oklch(72% 0.15 27);
+  --color-success: oklch(76% 0.13 150);
+  --color-focus: oklch(82% 0.15 80);
+  --color-scrim: oklch(10% 0.006 250 / 0.72);
+  /* Data colours: the dataviz reference palette's dark steps, in fixed order. Slot 0 is "Other". */
+  --color-category-0: oklch(62% 0.006 90);
+  --color-category-1: oklch(63% 0.16 254);
+  --color-category-2: oklch(63% 0.17 42);
+  --color-category-3: oklch(62% 0.12 163);
+  --color-category-4: oklch(66% 0.14 75);
+  --color-category-5: oklch(62% 0.17 358);
+  --color-category-6: oklch(55% 0.18 142);
+  --color-category-7: oklch(67% 0.13 283);
+  --color-category-8: oklch(65% 0.17 23);
+  /* Status, by Console's meanings: waiting on a person is amber, a repair under way is the instrument blue. */
+  --color-status-good: var(--color-ok);
+  --color-status-warning: var(--color-signal);
+  --color-status-serious: oklch(74% 0.14 50);
+  --color-status-critical: var(--color-bad);
+  --color-status-active: var(--color-cool);
+  --color-status-idle: var(--color-ink-3);
+  --color-status-void: oklch(52% 0.01 250);
+  --color-chart-grid: oklch(26% 0.008 250);
+  --color-chart-axis: oklch(36% 0.01 250);
+  --color-on-fill: oklch(15% 0.01 250);
+  --font-display: "Host Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-display);
-  --radius-card: 12px;
+  --font-outlier: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --radius-card: 10px;
   --radius-control: 6px;
-  --radius-pill: 999px;
-  --shadow-card: 0 20px 40px oklch(20% 0 0 / 0.16);
-  --tracking-display: -0.04em;
-  --tracking-title: -0.02em;
+  --radius-chip: 4px;
+  --radius-pill: 6px;
+  --shadow-card: none;
+  --tracking-display: -0.03em;
+  --tracking-title: -0.015em;
 }
-/* Ink (Hallmark) for CampusCare. Two of the theme's names collide with shadcn's
-   (its accent is a hover surface, its muted a quiet background), so the theme's
-   accent is --color-signal and its muted grey is --color-ink-3 here. */
+/* Console (Hallmark) for CampusCare. shadcn already owns --accent (a hover surface) and --muted
+   (a quiet background), so the theme's amber is --color-signal and its muted grey --color-ink-3. */
 :root {
-  color-scheme: light;
-  /* The organisation's accent. Settings > Accent colour writes the saved value
-     onto this property at runtime (app/campuscare.tsx); this is the default. */
-  --primary: oklch(53.4% 0.221 266);
+  color-scheme: dark;
+  /* The organisation's saved colour (Settings, Accent colour) is written here at runtime
+     (app/campuscare.tsx). It marks the organisation's name; amber keeps the actions. */
+  --color-org: oklch(63% 0.16 254);
   --space-3xs: 2px;
   --space-2xs: 4px;
   --space-xs: 8px;
@@ -100,38 +115,39 @@
   --z-toast: 500;
   --z-tooltip: 600;
   --rule-hair: 1px;
-  --display-weight: 700;
-  --control-h: 40px;
+  --display-weight: 500;
+  --control-h: 36px;
   --control-h-sm: 32px;
   /* shadcn's own variables, pointed at the tokens above. */
   --background: var(--color-paper);
   --foreground: var(--color-ink);
-  --card: var(--color-paper);
+  --card: var(--color-paper-2);
   --card-foreground: var(--color-ink);
-  --popover: var(--color-paper);
+  --popover: var(--color-paper-2);
   --popover-foreground: var(--color-ink);
-  --primary-foreground: var(--color-paper);
-  --secondary: var(--color-paper-3);
-  --secondary-foreground: var(--color-ink-2);
+  --primary: var(--color-signal);
+  --primary-foreground: var(--color-signal-ink);
+  --secondary: var(--color-paper-2);
+  --secondary-foreground: var(--color-ink);
   --muted: var(--color-paper-2);
   --muted-foreground: var(--color-ink-3);
-  --accent: var(--color-paper-3);
+  --accent: var(--color-hover);
   --accent-foreground: var(--color-ink);
-  --destructive: var(--color-error);
+  --destructive: var(--color-bad);
   --border: var(--color-rule);
-  --input: var(--color-ink-3);
+  --input: var(--color-rule-2);
   --ring: var(--color-focus);
-  --radius: 12px;
-  --sidebar: var(--color-paper-2);
+  --radius: 10px;
+  --sidebar: var(--color-paper-3);
   --sidebar-foreground: var(--color-ink-2);
-  --sidebar-primary: var(--color-ink);
-  --sidebar-primary-foreground: var(--color-paper);
-  --sidebar-accent: var(--color-paper-3);
+  --sidebar-primary: var(--color-signal);
+  --sidebar-primary-foreground: var(--color-signal-ink);
+  --sidebar-accent: var(--color-paper-2);
   --sidebar-accent-foreground: var(--color-ink);
   --sidebar-border: var(--color-rule);
   --sidebar-ring: var(--color-focus);
 }
-/* shadcn's utility names. Filled controls are ink; --primary feeds the accent. */
+/* shadcn's utility names. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -160,10 +176,11 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-md: calc(var(--radius) - 4px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xl: var(--radius);
   --font-sans: var(--font-body);
+  --font-mono: var(--font-outlier);
 }
 @media (max-width: 60rem) { :root { --gutter: 24px; --section-gap-s: 80px; --section-gap: 96px; --section-gap-l: 120px; } }
 @media (max-width: 40rem) { :root { --gutter: 16px; --section-gap-s: 56px; --section-gap: 72px; --section-gap-l: 96px; --gap-columns: 16px; } }
