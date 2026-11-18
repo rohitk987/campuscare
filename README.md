@@ -13,6 +13,7 @@ The native Android client is in [`android/`](android/README.md). It uses Kotlin 
 - Exactly one accessible organisation: BMSIT, with server-checked memberships and site scopes.
 - Email OTP verification for exact `@bmsit.in` and `@bmsit.ac.in` accounts, with rate limits and single-use expiring codes.
 - Admin-approved student records and active batches with access start/end dates; graduated, suspended, withdrawn and unlisted students are denied.
+- Roster import from a CSV file or rows pasted from a spreadsheet. Every row is checked first; the server then saves the file in 500-row chunks, each whole or not at all. Existing students keep their status unless the file sets it.
 - Reporter enrollment only after both current-student approval and email verification. Explicitly approved staff roles also require OTP.
 - Server rejection of other domains, legacy organisations, demo seeding and new organisation creation.
 - Remote login and complaint tracking; location checks apply only to new reports.
@@ -81,6 +82,8 @@ npm run build
 
 The 14 domain tests cover location and workflow rules. Forty-nine pilot API tests execute the actual API handlers and SQL against transactional SQLite with synthetic email delivery. They cover exact domains, current enrollment, OTP expiry/attempts/concurrency/replay/rate limits, secure session cookies, logout, administrator permissions, revocation, identity binding, and direct attempts to access legacy organisations or create demos. Seven reporting tests additionally exercise location rejection, fresh building-matched JPEG evidence, account-bound capture sessions, evidence expiry, private-photo access, idempotent submission, boundary changes, repair actions and reviewed reopening under OTP authentication. Gmail tests cover verified sender matching, scope checks, revoked authorization, identity-service failure, rejected delivery and configuration/header validation. Roster search runs on the server and returns pages of 100 records, so administrators can find and suspend records beyond the original 2,000-row limit. Four client tests check cross-tab account switching and delayed responses without allowing old privileged data to return. Four OAuth setup tests check Desktop client parsing, state/PKCE, callback validation and token/identity checks. Two additional tests execute the production mail adapter inside workerd and reject redirects without forwarding credentials. Three history regressions cover older complaints behind 600 inaccessible reports, 605 accessible reports with equal timestamps, and technician/site privacy. All 85 automated tests passed on 6 October 2026 using synthetic provider responses. Real inbox receipt and verification were confirmed during sender setup; the owner also reported sign-in success after the Pages-address test. Session persistence on the new hostname and an on-campus physical-device report remain unverified. See [pilot completion audit](docs/PILOT-COMPLETION-AUDIT.md) and [Gmail sender setup](docs/GMAIL-SENDER-SETUP.md). Earlier multi-organisation acceptance results are historical; the current pilot policy takes precedence.
 
+Roster import added 20 tests: 10 for reading, checking and planning files and for sending them in chunks (`tests/roster.test.mjs`), 6 for the import dialog (`tests/roster-import.test.mjs`), and 4 API tests in `tests/pilot-access.test.mjs` covering checks without writes, all-or-nothing chunks, status handling, administrator-only access and the database statements per request. On 18 November 2026 the 111 tests that run without workerd passed; run `node --test tests/*.test.mjs` for the full suite. The on-campus boundary and phone checks are in [On-campus setup and GPS test](docs/ON-CAMPUS-TEST.md).
+
 Two email-template tests and MIME transport checks cover the HTML and plain-text alternatives, leading-zero codes and safe interpolation. Ten tests execute the free-address proxy inside workerd under the Workers and Pages runtime configurations and check session forwarding, cross-origin rejection, fixed upstream routing, separate cookies and redirect protection. The email preview uses a synthetic code; inbox rendering still requires a real delivery check.
 
 ## Application structure
@@ -97,11 +100,13 @@ lib/server.ts                   prepared D1 statements and authorisation helpers
 lib/pilot.ts                    fixed BMSIT organisation and exact email-domain policy
 lib/access.ts                   email OTP, session and enrollment eligibility checks
 app/api/access/route.ts          OTP and administrator-only student/batch API
-app/access-panel.tsx             mailbox verification and student access screens
+app/access-panel.tsx             mailbox verification, student access screens and roster import
+lib/roster.ts                   roster file reading, row checks and import planning
 lib/seed.ts                     historical demo helpers; not reachable from the pilot API
 db/schema.ts                    schema definitions
 drizzle/                        generated schema migrations
 tests/domain.test.mjs            security and workflow unit tests
+tests/roster*.test.mjs           roster file, import dialog and chunking tests
 ```
 
 ## Data and access rules
@@ -120,11 +125,11 @@ This is a functional prototype, not a claim of production certification.
 
 - GPS is an estimate and can be manipulated. The camera-only interface is not hardware attestation. Geotagging links reported coordinates to evidence; it does not prove physical presence or a genuine fault. Staff verification remains required.
 - The implemented geofences are circles, not surveyed polygons or indoor floor positioning. Real campuses need on-site validation and may benefit from polygon support.
-- The current category catalogue is shared; configurable category templates, teams/routing rules, bulk roster import, logo upload and institutional SSO are follow-up extensions.
+- The current category catalogue is shared; configurable category templates, teams/routing rules, logo upload and institutional SSO are follow-up extensions.
 - In-app notifications are implemented for reporters. Following currently provides a followed-issues view; follower-specific notifications, email/SMS, scheduled reminders and automatic escalations are not implemented.
 - Subscription billing, payment collection and a platform-wide commercial administration console are not implemented.
 - This build does not configure automated backups, restores, retention jobs or orphan-upload cleanup. Establish and test these before collecting real evidence at scale. Protect credentials, configure customer access, and review applicable institutional requirements before a pilot.
-- Production deployment uses logical `DB` and `BUCKET` bindings in `.openai/hosting.json`; Sites provisions resources and applies migrations. Existing migration history must not be rewritten after deployment.
+- Production deployment runs `npm run deploy`, which creates the D1 database and R2 bucket on the owner's Cloudflare account when missing and applies the migrations in `drizzle/` (see [Self-hosting on Cloudflare](hosting/cloudflare/README.md)). Existing migration history must not be rewritten after deployment.
 
 ## Earlier previews
 

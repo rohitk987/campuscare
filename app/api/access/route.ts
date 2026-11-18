@@ -2,6 +2,8 @@ import {z} from 'zod';
 import {authenticatedIdentity,membership,admin,all,one,stmt,uid,mutateRequest,safeError,HttpError} from '@/lib/server';
 import {PILOT_ORG_ID,isPilotEmail,normaliseEmail} from '@/lib/pilot';
 import {assertEligibility,loginIdentity,getVerifiedIdentity,mailConfigured,sendVerificationCode,verifyCode,clearVerification} from '@/lib/access';
+import {ROSTER_CHUNK_ROWS,checkRoster,isRosterCells,planRoster} from '@/lib/roster';
+import type {RosterCohort,RosterRecord} from '@/lib/roster';
 export const dynamic='force-dynamic';
 const json=(data:unknown,headers:Record<string,string>={})=>Response.json(data,{headers:{'Cache-Control':'no-store',...headers}});
 function parse<S extends z.ZodTypeAny>(schema:S,data:unknown):z.output<S>{const result=schema.safeParse(data);if(!result.success)throw new HttpError(400,'Check the required fields and dates.');return result.data;}
@@ -38,6 +40,28 @@ export async function POST(request:Request){try{
   if(duplicate)throw new HttpError(409,'That USN already belongs to another student email.');
   await stmt('INSERT INTO student_records (id,org_id,email,name,usn,cohort_id,status,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(org_id,email) DO UPDATE SET name=excluded.name,usn=excluded.usn,cohort_id=excluded.cohort_id,status=excluded.status,updated_at=excluded.updated_at',uid(),PILOT_ORG_ID,email,input.name,input.usn.toUpperCase(),input.cohortId,input.status,Date.now()).run();
   return json({ok:true});
+ }
+ if(data.action==='import_students'){
+  // The browser reads the file and sends it in chunks; every chunk is checked again here,
+  // and with commit:true each chunk is written in one statement, all of its rows or none.
+  const input=parse(z.object({cohortId:z.string().max(100).default(''),commit:z.boolean().default(false)}),data),rows=(data as {rows?:unknown}).rows;
+  // A plain shape check: running hundreds of rows through zod costs more CPU than the import itself.
+  if(!Array.isArray(rows)||!rows.length||rows.length>ROSTER_CHUNK_ROWS||!rows.every(isRosterCells))throw new HttpError(400,'Some rows could not be read. Check the file again.');
+  const cohorts=await all<RosterCohort>('SELECT id,name FROM cohorts WHERE org_id=?',PILOT_ORG_ID);
+  if(input.cohortId&&!cohorts.some(cohort=>cohort.id===input.cohortId))throw new HttpError(400,'Select a valid BMSIT batch.');
+  const officialEmail=z.string().email(),checked=checkRoster(rows,{allowedEmail:email=>officialEmail.safeParse(email).success&&isPilotEmail(email)});
+  // One lookup finds every existing record that shares an email or a USN with these rows.
+  const existing=checked.rows.length?await all<RosterRecord>("SELECT email,usn,name,cohort_id,status FROM student_records WHERE org_id=? AND (email IN (SELECT value FROM json_each(?)) OR usn IN (SELECT value FROM json_each(?)))",PILOT_ORG_ID,JSON.stringify(checked.rows.map(row=>row.email)),JSON.stringify(checked.rows.map(row=>row.usn))):[];
+  const plan=planRoster(checked,{cohorts,defaultCohortId:input.cohortId,existing});
+  const report={summary:plan.summary,problems:plan.problems.slice(0,100),problemCount:plan.problems.length};
+  if(!input.commit)return json({...report,imported:false});
+  if(plan.problems.length)throw new HttpError(400,'Fix the problems listed for this file, then check it again. Nothing was imported.');
+  if(plan.writes.length){
+   const rows=JSON.stringify(plan.writes.map(row=>[uid(),row.email,row.name,row.usn,row.cohortId,row.status]));
+   try{await stmt("INSERT INTO student_records (id,org_id,email,name,usn,cohort_id,status,updated_at) SELECT json_extract(value,'$[0]'),?,json_extract(value,'$[1]'),json_extract(value,'$[2]'),json_extract(value,'$[3]'),json_extract(value,'$[4]'),json_extract(value,'$[5]'),? FROM json_each(?) WHERE true ON CONFLICT(org_id,email) DO UPDATE SET name=excluded.name,usn=excluded.usn,cohort_id=excluded.cohort_id,status=excluded.status,updated_at=excluded.updated_at",PILOT_ORG_ID,Date.now(),rows).run();}
+   catch(error){if(/unique|constraint/i.test(error instanceof Error?error.message:''))throw new HttpError(409,'The student list changed while importing, so these rows were not saved. Check the file again, then import it.');throw error;}
+  }
+  return json({...report,imported:true});
  }
  throw new HttpError(404,'Unknown action.');
  }catch(error){return safeError(error);}}

@@ -20,10 +20,10 @@ The public Pages address and direct email-code login are deployed. The applicati
 
 ## Inputs required to finish the live pilot
 
-1. An approved current-student list with official email, name, USN and batch, plus confirmed access dates. Enter these in **Student access**. Do not infer current enrollment from email prefixes or tentative academic calendars.
+1. An approved current-student list with official email, name, USN and batch, plus confirmed access dates. Enter these in **Student access**, one at a time or with **Import a file** (a CSV file or rows pasted from a spreadsheet). Do not infer current enrollment from email prefixes or tentative academic calendars.
 2. A site centre/radius and each building/zone's centre/radius, checked on campus. The administrator can use **Locations → Use current position** on a phone, then confirm the intended boundary before enabling reporting. Add valid floors and rooms. Map the off-site girls' hostel separately.
 3. Approved verifier and maintenance identities and their site scopes, entered in **People**.
-4. A physical-device acceptance run: sign in at the Pages address; refresh and confirm the dashboard remains accessible; make one authorised on-campus report; confirm an outside-campus new report is refused while progress remains accessible; have staff verify and resolve the test complaint; sign out and confirm protected access ends.
+4. A physical-device acceptance run, following [On-campus setup and GPS test](ON-CAMPUS-TEST.md): sign in at the Pages address; refresh and confirm the dashboard remains accessible; make one authorised on-campus report; confirm an outside-campus new report is refused while progress remains accessible; have staff verify and resolve the test complaint; sign out and confirm protected access ends.
 
 Published BMSIT contacts and facility names are already linked on the login page. [Official-site research](bmsit-campus-research.md) records their sources and explains why public map markers, historical room notices and graduation announcements do not establish safe geofences or an authoritative current-student roster.
 

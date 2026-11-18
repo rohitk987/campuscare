@@ -26,12 +26,23 @@ Deploy the current saved version after changing hosted environment values. Until
 
 1. The designated administrator enters the confirmed BMSIT address directly on CampusCare and verifies the emailed code. A ChatGPT account is not required. Initial setup access is reserved for that address; the first visitor does not become administrator.
 2. Open **Student access** and add the institution-confirmed batches. Set admission year, access start date, access end date and whether the batch is enabled. Date inputs use Indian Standard Time; access ends after the selected end date.
-3. Add each current student from the official college list with name, exact official email, USN, batch and enrollment status. Emails and USNs are unique within BMSIT. Search checks the full server roster by name, email or USN; use Previous/Next page for the 100-record pages. Unlisted accounts cannot request an OTP for CampusCare access.
+3. Import the official college list with **Import a file** (see [Import the student list from a file](#import-the-student-list-from-a-file)), or add students one at a time with **Add student**: name, exact official email, USN, batch and enrollment status. Emails and USNs are unique within BMSIT. Search checks the full server roster by name, email or USN; use Previous/Next page for the 100-record pages. Unlisted accounts cannot request an OTP for CampusCare access.
 4. Add the setup administrator's own student record if that administrator is a student. Once a student record exists, its eligibility takes precedence over an administrative role. Arrange an approved continuing administrator before that student's access ends.
 5. Use **People** to approve maintenance staff and verifiers with official college emails and appropriate site scopes. Explicitly approved staff need OTP but are not required to have a student batch. A staff member who also has an inactive student record remains blocked until the administrator corrects the verified enrollment record.
 6. Mark graduates as `graduated`, withdrawn students as `withdrawn` and suspended students as `suspended`. Disable a whole batch when needed. No student can edit these records or access dates.
 
 Student eligibility is checked on every protected server request, including complaint tracking and evidence access. Batch expiry therefore blocks an existing verified session without waiting for logout or a scheduled job. Membership deactivation also blocks subsequent requests, including attempts to sign in again under the same account with a changed email. Records and complaint history are retained.
+
+## Import the student list from a file
+
+1. In **Student access**, add the batches first. Then choose **Import a file**.
+2. Choose a CSV file, or copy the rows from the spreadsheet and paste them with the column names first. From Excel, use **File → Save As → CSV UTF-8**; from Google Sheets, **File → Download → Comma-separated values**. **Download a blank template** gives the column row.
+3. Columns can be in any order: `email`, `name` and `usn` are required; `batch` and `status` are optional. Common headings such as "Email ID", "Student Name" and "USN No." are recognised, and other columns, such as branch, are ignored.
+4. A `batch` cell must match a batch name under **Student batches**; case and the kind of dash don't matter. Rows without one use the batch chosen in the dialog.
+5. `status` is `active`, `graduated`, `withdrawn` or `suspended`. Without a status column, existing students keep their status and new students start as active. The check says how many students the file would set back to active.
+6. **Check the file** lists every problem by line and saves nothing. The import button appears only when the check finds no problems.
+
+An email already on the list updates that student's name, USN and batch; a USN that belongs to a different email is refused. Importing never deletes: students missing from the file are left as they are, so mark graduates with **Edit access** or a status column. The browser sends the rows in chunks of 500, and the server checks each chunk again and saves it whole or not at all. If an import stops part-way, import the same file again: rows already saved count as unchanged. A file can hold up to 10,000 rows and 2 MB; split larger lists into one file per batch.
 
 ## Student workflow
 

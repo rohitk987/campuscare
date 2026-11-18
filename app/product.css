@@ -111,6 +111,13 @@
 .batch-list strong { display: block; color: var(--color-ink); }
 .access-search { max-width: 20rem; margin-bottom: var(--space-md); }
 .pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-sm); padding-top: var(--space-md); }
+.import-rules { margin: 0; padding-left: var(--space-md); list-style: disc; font-size: var(--text-sm); line-height: 1.55; color: var(--color-ink-2); }
+.import-rules li + li { margin-top: var(--space-2xs); }
+.import-report { display: grid; gap: var(--space-xs); padding: var(--space-sm) var(--space-md); border: 1px solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-paper-2); font-size: var(--text-sm); line-height: 1.55; color: var(--color-ink-2); }
+.import-report strong { color: var(--color-ink); }
+.problem-list { max-height: 16rem; margin: 0; padding: 0; overflow-y: auto; border-top: 1px solid var(--color-rule); list-style: none; }
+.problem-list li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: var(--space-sm); padding: var(--space-2xs) 0; border-bottom: 1px solid var(--color-rule); }
+.problem-list li:last-child { border-bottom: 0; }
 
 /* Settings */
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 1fr); align-items: start; gap: var(--space-xl) var(--space-2xl); }

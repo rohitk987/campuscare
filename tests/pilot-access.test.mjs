@@ -4,6 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFile} from 'node:fs/promises';
 import {build} from 'esbuild';
 import {isPilotEmail, PILOT_ORG_ID} from '../lib/pilot.ts';
+import {readRoster,ROSTER_CHUNK_ROWS} from '../lib/roster.ts';
 import {decodeMailParts,assertMailContent} from './helpers/mail.mjs';
 
 // Run the production API handlers and migrations with real cookie authentication,
@@ -302,6 +303,57 @@ test('student pagination rejects invalid inputs and clamps pages after records c
  for(const page of ['0','-1','1.5','bad','100001'])assert.equal((await accessGet('students&page='+page)).status,400);
  assert.equal((await accessGet('students&search='+'x'.repeat(201))).status,400);
  const results=await (await accessGet('students&page=999')).json();assert.equal(results.pagination.page,1);assert.equal(results.students.length,1);
+});
+const rosterRows=(...lines)=>readRoster(['email,name,usn,batch,status',...lines].join('\n')).rows;
+const studentRows=()=>database.prepare('SELECT email,name,usn,cohort_id,status FROM student_records ORDER BY email').all().map(record=>({...record}));
+test('administrators check a roster chunk without writing, then import it and those students can sign in',async()=>{
+ await signIn(ADMIN);
+ const rows=rosterRows(' First@BMSIT.in ,First  Student,1by24cs001,,','second@bmsit.ac.in,Second Student,1BY24CS002,Synthetic current batch,','third@bmsit.in,Third Student,1BY24CS003,synthetic  CURRENT batch,Active');
+ const preview=await accessPost('import_students',{rows,cohortId:'current-batch'});assert.equal(preview.status,200);
+ const checked=await preview.json();assert.deepEqual(checked.summary,{rows:3,create:3,update:0,unchanged:0,reactivate:0});assert.equal(checked.imported,false);assert.deepEqual(checked.problems,[]);
+ assert.equal(row('SELECT COUNT(*) n FROM student_records').n,0);
+ const imported=await accessPost('import_students',{rows,cohortId:'current-batch',commit:true});assert.equal(imported.status,200);assert.equal((await imported.json()).imported,true);
+ assert.deepEqual(studentRows(),[
+  {email:'first@bmsit.in',name:'First Student',usn:'1BY24CS001',cohort_id:'current-batch',status:'active'},
+  {email:'second@bmsit.ac.in',name:'Second Student',usn:'1BY24CS002',cohort_id:'current-batch',status:'active'},
+  {email:'third@bmsit.in',name:'Third Student',usn:'1BY24CS003',cohort_id:'current-batch',status:'active'},
+ ]);
+ const again=await (await accessPost('import_students',{rows,cohortId:'current-batch',commit:true})).json();assert.deepEqual(again.summary,{rows:3,create:0,update:0,unchanged:3,reactivate:0});
+ visitor=user('second@bmsit.ac.in');cookie='';assert.equal((await accessPost('send_code')).status,200);
+});
+test('a roster chunk with any problem imports nothing and reports each problem by line',async()=>{
+ await signIn(ADMIN);approve('taken@bmsit.in',{usn:'1BY24CS099'});
+ const rows=rosterRows('good@bmsit.in,Good Student,1BY24CS010,,','outside@gmail.com,Outside,1BY24CS011,,','clash@bmsit.in,Clash,1by24cs099,,','late@bmsit.in,Late,1BY24CS012,2030-2034,','odd@bmsit.in,Odd,1BY24CS013,,enrolled');
+ const checked=await (await accessPost('import_students',{rows,cohortId:'current-batch'})).json();
+ assert.deepEqual(checked.problems.map(problem=>problem.line),[3,4,5,6]);assert.equal(checked.problemCount,4);assert.equal(checked.problems[1].message,'USN 1BY24CS099 already belongs to taken@bmsit.in.');
+ const refused=await accessPost('import_students',{rows,cohortId:'current-batch',commit:true});assert.equal(refused.status,400);assert.match((await refused.json()).error,/Nothing was imported/);
+ assert.deepEqual(studentRows().map(record=>record.email),['taken@bmsit.in']);
+ const oversized=Array.from({length:ROSTER_CHUNK_ROWS+1},(_,index)=>[index+2,`s${index}@bmsit.in`,'S','1S'+index,'','']);
+ for(const values of [{},{rows:[]},{rows:'email,name,usn'},{rows:[[0,'a@bmsit.in','A','1A','','']]},{rows:[[2,'a@bmsit.in','A','1A','']]},{rows:oversized},{rows:rosterRows('a@bmsit.in,A,1A,,'),cohortId:'another-tenant'}])assert.equal((await accessPost('import_students',values)).status,400);
+ assert.equal(row('SELECT COUNT(*) n FROM student_records').n,1);
+});
+test('roster imports keep a suspended student suspended unless the file sets the status',async()=>{
+ await signIn(ADMIN);approve('held@bmsit.in',{usn:'1BY24CS020',status:'suspended'});
+ const plain=await (await accessPost('import_students',{rows:readRoster('email,name,usn\nheld@bmsit.in,Held Student,1BY24CS020').rows,cohortId:'current-batch',commit:true})).json();
+ assert.deepEqual(plain.summary,{rows:1,create:0,update:1,unchanged:0,reactivate:0});assert.deepEqual(studentRows()[0],{email:'held@bmsit.in',name:'Held Student',usn:'1BY24CS020',cohort_id:'current-batch',status:'suspended'});
+ visitor=user('held@bmsit.in');assert.equal((await accessPost('send_code')).status,403);
+ const reactivated=await (await accessPost('import_students',{rows:readRoster('email,name,usn,status\nheld@bmsit.in,Held Student,1BY24CS020,active').rows,cohortId:'current-batch',commit:true})).json();
+ assert.equal(reactivated.summary.reactivate,1);assert.equal((await accessPost('send_code')).status,200);
+});
+test('only administrators can import, and a full chunk takes a handful of database statements',async()=>{
+ const rows=Array.from({length:ROSTER_CHUNK_ROWS},(_,index)=>{const number=String(index).padStart(4,'0');return [index+2,`roster${number}@bmsit.in`,`Roster Student ${number}`,`1BY24CS${number}`,'',''];});
+ visitor=user(ADMIN);assert.equal((await accessPost('import_students',{rows,cohortId:'current-batch',commit:true})).status,401);
+ approve('student@bmsit.in');await signIn('student@bmsit.in');assert.equal((await accessPost('import_students',{rows,cohortId:'current-batch',commit:true})).status,403);
+ await signIn(ADMIN);
+ const forged=await access.POST(new Request('https://campus.test/api/access',{method:'POST',headers:{'Content-Type':'application/json','X-Campuscare-Request':'1','Origin':'https://evil.test'},body:JSON.stringify({action:'import_students',rows,cohortId:'current-batch',commit:true})}));assert.equal(forged.status,403);
+ assert.equal(row("SELECT COUNT(*) n FROM student_records WHERE email LIKE 'roster%'").n,0);
+ // D1 limits the queries one Worker request may make; the import itself needs three.
+ const prepare=state.env.DB.prepare;let statements=0;state.env.DB.prepare=sql=>{statements++;return prepare(sql);};
+ try{const response=await accessPost('import_students',{rows,cohortId:'current-batch',commit:true});assert.equal(response.status,200);assert.equal((await response.json()).summary.create,ROSTER_CHUNK_ROWS);}
+ finally{state.env.DB.prepare=prepare;}
+ assert.ok(statements<20,`the import used ${statements} statements`);
+ assert.equal(row("SELECT COUNT(*) n FROM student_records WHERE email LIKE 'roster%'").n,ROSTER_CHUNK_ROWS);
+ assert.equal(row('SELECT COUNT(DISTINCT id) n FROM student_records').n,row('SELECT COUNT(*) n FROM student_records').n);
 });
 test('global eligibility rejection is distinct from an ordinary workflow permission error',async()=>{
  approve('student@bmsit.in');await signIn('student@bmsit.in');const forbidden=await post('save_site',{orgId:PILOT_ORG_ID});assert.equal(forbidden.status,403);assert.equal((await forbidden.json()).code,undefined);
